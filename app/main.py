@@ -1,0 +1,58 @@
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import get_settings
+from app.core.database import engine, Base
+from app.api.auth import router as auth_router
+from app.api import wiki_router
+
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup - create all tables including new tenant table
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    yield
+
+    # Shutdown
+    await engine.dispose()
+
+
+app = FastAPI(
+    title="Inika Backend - Multi-Tenant Hotel Platform",
+    description="Multi-tenant SaaS platform for hotels with WhatsApp AI agent integration",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(auth_router)
+app.include_router(wiki_router)
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "app": "inika-backend", "version": "2.0.0"}
+
+
+@app.get("/")
+async def root():
+    return {
+        "message": "Inika Backend - Multi-Tenant Hotel Platform",
+        "version": "2.0.0",
+        "docs": "/docs",
+        "multi_tenant": True,
+    }
