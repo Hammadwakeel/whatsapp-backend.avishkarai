@@ -540,6 +540,107 @@ const searchPages = async (query) => {
 
 ---
 
+## Agent Configuration Integration
+
+### Get Agent Status
+
+```javascript
+const getAgentStatus = async () => {
+  const response = await fetch("http://localhost:8000/agent/status", {
+    headers: getAuthHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: { is_configured, has_system_prompt, has_personality_prompt, config_id }
+};
+```
+
+### Create/Update Agent Configuration
+
+```javascript
+const saveAgentConfig = async (systemPrompt, personalityPrompt) => {
+  const response = await fetch("http://localhost:8000/agent/config", {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      system_prompt: systemPrompt,
+      personality_prompt: personalityPrompt
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+};
+```
+
+### Partially Update Configuration
+
+```javascript
+const updateSystemPrompt = async (newSystemPrompt) => {
+  const response = await fetch("http://localhost:8000/agent/config", {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      system_prompt: newSystemPrompt
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+};
+```
+
+### Test Agent
+
+```javascript
+const testAgent = async (question, context) => {
+  const response = await fetch("http://localhost:8000/agent/test", {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      question,
+      context
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: { answer, sources, agent_config_used, wiki_context, web_search_used }
+};
+```
+
+### Delete Agent Configuration
+
+```javascript
+const deleteAgentConfig = async () => {
+  const response = await fetch("http://localhost:8000/agent/config", {
+    method: "DELETE",
+    headers: getAuthHeaders()
+  });
+
+  if (!response.ok && response.status !== 204) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return true;
+};
+```
+
+---
+
 ## Error Handling
 
 ### Common Error Responses

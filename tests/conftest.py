@@ -27,8 +27,9 @@ def event_loop():
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     # Import all models to register them with Base.metadata
     from app.models.tenant import Tenant
-    from app.models.user import User, UserHistory, Session, RefreshToken
+    from app.models.agent import AgentConfig
     from app.models.wiki import WikiSource, WikiPage, WikiLink, WikiLog
+    from app.models.user import Session, RefreshToken
 
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)

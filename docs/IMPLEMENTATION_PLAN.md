@@ -283,21 +283,26 @@ POST /webhook/events         # OpenClaw events (connect, disconnect)
 
 ---
 
-### Phase 3: Agent Configuration
+### Phase 3: Agent Configuration ✅
 
 **Duration**: 1 day
 
 **Tasks**:
-1. Create `agent_configs` table
-2. Create agent config service
-3. Update LLM service to use per-tenant keys
-4. Create agent configuration endpoints
+1. ✅ Create `agent_configs` table
+2. ✅ Create agent config service
+3. ✅ Create agent configuration endpoints
+4. ✅ Update documentation
 
-**Files to Create/Modify**:
+**Files Created/Modified**:
 - `app/models/agent.py` - Agent config model
 - `app/services/agent_service.py` - Agent logic
 - `app/api/agent.py` - Agent routes
-- `app/services/llm_service.py` - Update for tenant keys
+- `app/schemas/agent.py` - Pydantic schemas
+- `app/main.py` - Registered agent router
+- `docs/API.md` - Added agent documentation
+- `tests/test_agent.py` - Agent tests
+
+**Status**: Complete (32 tests passing)
 
 ---
 
@@ -537,15 +542,21 @@ UPLOAD_DIR=./uploads
 
 ## Acceptance Criteria
 
-### Phase 1 (Multi-Tenant)
-- [ ] Tenant can register and login
-- [ ] All data is tenant-isolated
-- [ ] JWT contains tenant_id
+### Phase 1 (Multi-Tenant) ✅
+- [x] Tenant can register and login
+- [x] All data is tenant-isolated
+- [x] JWT contains tenant_id
 
-### Phase 2-3 (Agent Config)
-- [ ] Admin can set system/personality prompts
-- [ ] Admin can configure API keys per tenant
-- [ ] Agent test returns response
+### Phase 2 (Shared API Keys) ✅
+- [x] OpenRouter API key is shared across all tenants
+- [x] Tavily API key is shared across all tenants
+- [x] LLM service uses shared keys
+
+### Phase 3 (Agent Configuration) ✅
+- [x] Admin can set system/personality prompts
+- [x] Agent configuration is tenant-isolated
+- [x] Agent test endpoint works
+- [x] Agent status endpoint works
 
 ### Phase 4-5 (WhatsApp)
 - [ ] QR code displayed for WhatsApp connect

@@ -6,6 +6,7 @@ from app.core.config import get_settings
 from app.core.database import engine, Base
 from app.api.auth import router as auth_router
 from app.api import wiki_router
+from app.api.agent import router as agent_router
 
 settings = get_settings()
 
@@ -41,6 +42,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth_router)
 app.include_router(wiki_router)
+app.include_router(agent_router)
 
 
 @app.get("/health")

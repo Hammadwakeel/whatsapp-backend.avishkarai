@@ -12,6 +12,10 @@ from app.schemas.wiki import (
     LintRequest, LintResponse, LintIssue,
     IndexResponse, LogEntry, LogListResponse,
 )
+from app.schemas.agent import (
+    AgentConfigCreate, AgentConfigUpdate, AgentConfigResponse,
+    AgentTestRequest, AgentTestResponse,
+)
 
 __all__ = [
     "TenantCreate", "TenantLogin", "TenantUpdate", "TenantResponse", "TokenResponse",
@@ -20,4 +24,6 @@ __all__ = [
     "IngestRequest", "IngestResponse", "QueryRequest", "QueryResponse",
     "LintRequest", "LintResponse", "LintIssue",
     "IndexResponse", "LogEntry", "LogListResponse",
+    "AgentConfigCreate", "AgentConfigUpdate", "AgentConfigResponse",
+    "AgentTestRequest", "AgentTestResponse",
 ]

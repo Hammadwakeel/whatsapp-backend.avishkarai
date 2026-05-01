@@ -18,9 +18,10 @@ Multi-Tenant Hotel Platform with WhatsApp AI Agent integration.
 1. [Authentication](#authentication) - Tenant-based auth (register, login, logout)
 2. [Profile](#profile) - Tenant profile management
 3. [Wiki](#wiki) - Knowledge base API
-4. [Health](#health) - Health check endpoints
-5. [Data Models](#data-models)
-6. [Error Responses](#error-responses)
+4. [Agent Configuration](#agent-configuration) - AI agent configuration
+5. [Health](#health) - Health check endpoints
+6. [Data Models](#data-models)
+7. [Error Responses](#error-responses)
 
 ---
 
@@ -443,26 +444,148 @@ Get overview of wiki content.
 
 ---
 
-## Health
+## Agent Configuration
 
-### Health Check
+All agent endpoints require authentication with `Authorization: Bearer <token>`.
 
-**Endpoint**: `GET /health`
+### Get Agent Configuration
+
+Get the current agent configuration for the tenant.
+
+**Endpoint**: `GET /agent/config`
+
+**Headers**: `Authorization: Bearer <access_token>`
 
 **Response** (200 OK):
 ```json
 {
-  "status": "healthy",
-  "app": "inika-backend",
-  "version": "2.0.0"
+  "id": "uuid",
+  "tenant_id": "uuid",
+  "system_prompt": "You are a helpful hotel assistant...",
+  "personality_prompt": "Be friendly and professional...",
+  "is_configured": true,
+  "created_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-01T00:00:00Z"
 }
 ```
 
 ---
 
-### Root
+### Create Agent Configuration
 
-**Endpoint**: `GET /`
+Create or replace the agent configuration.
+
+**Endpoint**: `POST /agent/config`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Request Body**:
+```json
+{
+  "system_prompt": "You are a helpful hotel assistant...",
+  "personality_prompt": "Be friendly and professional..."
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| system_prompt | string | No | Main system prompt for the AI |
+| personality_prompt | string | No | Personality traits and style |
+
+**Response** (201 Created): Returns agent config object.
+
+---
+
+### Update Agent Configuration
+
+Partially update the agent configuration.
+
+**Endpoint**: `PATCH /agent/config`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Request Body**:
+```json
+{
+  "system_prompt": "Updated system prompt..."
+}
+```
+
+**Response** (200 OK): Returns updated agent config object.
+
+---
+
+### Delete Agent Configuration
+
+Delete the agent configuration.
+
+**Endpoint**: `DELETE /agent/config`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response** (204 No Content)
+
+---
+
+### Test Agent
+
+Test the agent with a sample question.
+
+**Endpoint**: `POST /agent/test`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Request Body**:
+```json
+{
+  "question": "What are your check-in times?",
+  "context": "Guest asking about hotel policies"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "answer": "Check-in time is 3:00 PM...",
+  "sources": ["page-1", "page-2"],
+  "agent_config_used": true,
+  "wiki_context": true,
+  "web_search_used": false
+}
+```
+
+**Behavior**:
+- Searches tenant's wiki first
+- Falls back to Tavily web search if no wiki results
+- Uses agent configuration (system/personality prompts) if configured
+
+---
+
+### Get Agent Status
+
+Get the current configuration status.
+
+**Endpoint**: `GET /agent/status`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response** (200 OK):
+```json
+{
+  "is_configured": true,
+  "has_system_prompt": true,
+  "has_personality_prompt": false,
+  "config_id": "uuid"
+}
+```
+
+---
+
+## Health
+
+### Health Check
+
+**Endpoint**: `GET /health`
 
 **Response** (200 OK):
 ```json
@@ -530,6 +653,18 @@ Get overview of wiki content.
 | tags | string | JSON array of tags |
 | is_draft | boolean | Draft status |
 | tenant_id | string | Tenant ID (for isolation) |
+
+### AgentConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string (UUID) | Unique identifier |
+| tenant_id | string (UUID) | Tenant ID (unique, FK → tenants.id) |
+| system_prompt | string | Main system prompt for AI agent |
+| personality_prompt | string | Personality traits and style |
+| is_configured | boolean | Whether agent has valid configuration |
+| created_at | datetime | Creation timestamp |
+| updated_at | datetime | Last update timestamp |
 
 ---
 
@@ -641,6 +776,22 @@ curl -X POST http://localhost:8000/wiki/ingest \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"title":"Test","content":"Content","source_type":"article"}'
+
+# Create agent configuration
+curl -X POST http://localhost:8000/agent/config \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"system_prompt":"You are a hotel concierge.","personality_prompt":"Be friendly."}'
+
+# Get agent status
+curl http://localhost:8000/agent/status \
+  -H "Authorization: Bearer <access_token>"
+
+# Test agent
+curl -X POST http://localhost:8000/agent/test \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What amenities do you offer?"}'
 ```
 
 ### Python (requests)
@@ -674,6 +825,23 @@ requests.get(f"{BASE_URL}/auth/profile", headers={
 requests.post(f"{BASE_URL}/wiki/ingest",
     headers={"Authorization": f"Bearer {access_token}"},
     json={"title": "Test", "content": "Content", "source_type": "article"}
+)
+
+# Create agent configuration
+requests.post(f"{BASE_URL}/agent/config",
+    headers={"Authorization": f"Bearer {access_token}"},
+    json={"system_prompt": "You are a hotel concierge.", "personality_prompt": "Be friendly."}
+)
+
+# Get agent status
+requests.get(f"{BASE_URL}/agent/status",
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+
+# Test agent
+requests.post(f"{BASE_URL}/agent/test",
+    headers={"Authorization": f"Bearer {access_token}"},
+    json={"question": "What amenities do you offer?"}
 )
 ```
 
@@ -812,6 +980,15 @@ wiki_log (per tenant)
 ├── user_id (VARCHAR(36))
 ├── details (TEXT - JSON)
 └── created_at (TIMESTAMP)
+
+agent_configs (per tenant, unique per tenant)
+├── id (VARCHAR(36), PK)
+├── tenant_id (VARCHAR(36), FK → tenants.id, unique)
+├── system_prompt (TEXT)
+├── personality_prompt (TEXT)
+├── is_configured (BOOLEAN)
+├── created_at (TIMESTAMP)
+└── updated_at (TIMESTAMP)
 ```
 
 ---
