@@ -264,20 +264,22 @@ POST /webhook/events         # OpenClaw events (connect, disconnect)
 
 ---
 
-### Phase 2: Per-Tenant API Keys
+### Phase 2: Shared API Keys
 
 **Duration**: 0.5 day
 
 **Tasks**:
-1. Create `tenant_api_keys` table
-2. Create API key service
-3. API key management UI endpoints
-4. Update config to read from tenant keys
+1. Configure shared API keys in environment (OPENROUTER_API_KEY, TAVILY_API_KEY)
+2. Update LLMService to use shared OpenRouter key
+3. Create TavilySearchService for web search fallback
+4. Document that keys are shared across all tenants
 
 **Files to Create/Modify**:
-- `app/models/api_keys.py` - API key model
-- `app/services/api_key_service.py` - Key management
-- `app/api/keys.py` - Key management routes
+- `app/core/config.py` - Add TAVILY_API_KEY setting
+- `app/services/search_service.py` - NEW: Tavily search service
+- `app/services/llm_service.py` - Update for shared key
+
+**Key Decision**: API keys (OpenRouter, Tavily) are SHARED across all tenants, not per-tenant. Each tenant shares the same LLM and search services configured in environment variables.
 
 ---
 

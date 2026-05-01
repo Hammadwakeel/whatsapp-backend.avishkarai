@@ -18,10 +18,13 @@ class Settings(BaseSettings):
     debug: bool = True
     cors_origins: List[str] = ["http://localhost:3000"]
 
-    # Wiki / LLM
+    # Wiki / LLM (SHARED across all tenants)
     wiki_path: str = "wiki"
     openrouter_api_key: str = ""
     llm_model: str = "anthropic/claude-3-haiku"
+
+    # Web Search (SHARED across all tenants)
+    tavily_api_key: str = ""
 
     class Config:
         env_file = ".env"
