@@ -257,6 +257,65 @@ Repository: https://github.com/Hammadwakeel/whatsapp-backend.avishkarai.git
 
 ---
 
+## Frontend Development
+
+### Stack
+- **Framework**: Next.js 14+ (App Router)
+- **Styling**: Tailwind CSS + CSS variables for theming
+- **Animations**: Framer Motion for transitions and interactions
+- **State**: React hooks + Context for auth
+
+### Framer Motion Patterns
+
+```jsx
+import { motion, AnimatePresence } from 'framer-motion';
+
+// Page transitions
+const pageVariants = {
+  initial: { opacity: 0, x: -20 },
+  enter: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: 20 }
+};
+
+// Staggered list animations
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.1 }
+  }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0 }
+};
+
+// Hover effects
+const cardHover = {
+  scale: 1.02,
+  boxShadow: "0 10px 40px rgba(0,0,0,0.1)",
+  transition: { duration: 0.2 }
+};
+
+// Modal/overlay animations
+const overlayVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1 }
+};
+```
+
+### Important Rules
+1. **DO NOT change the theme** - Keep existing color scheme and design language
+2. **Use CSS variables** for any new colors to maintain consistency
+3. **Preserve existing components** - Don't rewrite working code
+4. **Add animations sparingly** - Enhance UX, don't distract
+
+### Theme Colors (Do Not Change)
+CSS variables are defined in `app/globals.css` - use these for consistency.
+
+---
+
 ## CLI Commands
 
 ```bash
