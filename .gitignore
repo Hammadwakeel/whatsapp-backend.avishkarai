@@ -53,3 +53,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Allow frontend directory (don't ignore frontend subdirectories)
+!frontend/

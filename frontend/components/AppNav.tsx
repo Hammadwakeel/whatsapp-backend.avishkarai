@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { LayoutDashboard, MessageSquare, Brain, User, LogOut, MapPin, Calendar } from "lucide-react";
-import { logout } from "@/lib/api";
+import { logout, getStoredToken, clearStoredAuth } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 const LINKS = [
   { href: "/dashboard", label: "DASHBOARD", icon: LayoutDashboard },
@@ -18,11 +19,23 @@ const LINKS = [
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
+  const [token, setToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check if user is logged in
+    const storedToken = getStoredToken();
+    setToken(storedToken || null);
+  }, []);
 
   const handleLogout = async () => {
     await logout();
     router.push("/login");
   };
+
+  // Don't show nav if not logged in (except for login page)
+  if (!token && pathname !== "/login") {
+    return null;
+  }
 
   return (
     <nav className="sticky top-0 z-50 border-b border-black/20 bg-transparent text-black backdrop-blur-md">

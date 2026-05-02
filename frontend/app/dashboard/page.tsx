@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   ArrowRight,
@@ -5,10 +7,16 @@ import {
   CalendarSync,
   MessageSquare,
   Route,
-  User
+  User,
+  Loader2,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import DashboardRecentActivity from "@/components/DashboardRecentActivity";
 import DashboardOpsStatus from "@/components/DashboardOpsStatus";
+import AppNav from "@/components/AppNav";
+import NavigationWrapper from "@/components/NavigationWrapper";
+import { getStoredTenant, getStoredToken, clearStoredAuth } from "@/lib/api";
+import { useRouter } from "next/navigation";
 
 const MODULES = [
   {
@@ -44,60 +52,99 @@ const MODULES = [
 ];
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const [tenant, setTenant] = useState<{ name?: string; hotel_name?: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = getStoredToken();
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+
+    const storedTenant = getStoredTenant();
+    setTenant(storedTenant);
+    setLoading(false);
+  }, [router]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black">
+        <div className="text-center">
+          <Loader2 className="mx-auto h-8 w-8 animate-spin text-white" />
+          <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.4em] text-white/50">
+            Loading Dashboard...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen overflow-x-hidden bg-white font-sans text-black selection:bg-black selection:text-white">
-      <section className="border-y border-black px-6 py-12">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-6 flex items-center gap-4">
-            <h2 className="whitespace-nowrap text-[11px] font-black uppercase tracking-[0.35em]">
-              Active Modules
-            </h2>
-            <div className="h-px flex-grow bg-black" />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            {MODULES.map((mod) => (
-              <ModuleCard
-                key={mod.href}
-                href={mod.href}
-                title={mod.title}
-                body={mod.body}
-                icon={mod.icon}
-              />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="bg-zinc-50 px-6 py-16">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-8 flex items-end justify-between gap-6">
-            <div>
-              <p className="text-[10px] font-mono uppercase tracking-[0.3em] text-zinc-500">
-                Real-Time Feed
-              </p>
-              <h3 className="mt-2 text-4xl font-black tracking-tight md:text-6xl">RECENT ACTIVITIES</h3>
+    <NavigationWrapper>
+      <div className="min-h-screen overflow-x-hidden bg-white font-sans text-black selection:bg-black selection:text-white">
+        {/* Module Cards Section */}
+        <section className="border-y border-black px-6 py-12">
+          <div className="mx-auto max-w-7xl">
+            <div className="mb-6 flex items-center gap-4">
+              <h2 className="whitespace-nowrap text-[11px] font-black uppercase tracking-[0.35em]">
+                Active Modules
+              </h2>
+              <div className="h-px flex-grow bg-black" />
+              {tenant?.hotel_name && (
+                <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">
+                  {tenant.hotel_name}
+                </span>
+              )}
             </div>
-            <span className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
-              INIKA CONTROL
-            </span>
-          </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <DashboardRecentActivity />
-            <DashboardOpsStatus />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              {MODULES.map((mod) => (
+                <ModuleCard
+                  key={mod.href}
+                  href={mod.href}
+                  title={mod.title}
+                  body={mod.body}
+                  icon={mod.icon}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <footer className="border-t border-black bg-black px-6 py-10 text-white">
-        <div className="mx-auto flex max-w-7xl flex-col justify-between gap-3 text-[10px] font-mono uppercase tracking-[0.25em] text-zinc-500 md:flex-row">
-          <span>// Secure_Channel_Active //</span>
-          <span>Digital Hotel Theme</span>
-          <span>Dashboard Session: Operational</span>
-        </div>
-      </footer>
-    </div>
+        {/* Activity Section */}
+        <section className="bg-zinc-50 px-6 py-16">
+          <div className="mx-auto max-w-7xl">
+            <div className="mb-8 flex items-end justify-between gap-6">
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-[0.3em] text-zinc-500">
+                  Real-Time Feed
+                </p>
+                <h3 className="mt-2 text-4xl font-black tracking-tight md:text-6xl">RECENT ACTIVITIES</h3>
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
+                INIKA CONTROL
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <DashboardRecentActivity />
+              <DashboardOpsStatus />
+            </div>
+          </div>
+        </section>
+
+        {/* Footer */}
+        <footer className="border-t border-black bg-black px-6 py-10 text-white">
+          <div className="mx-auto flex max-w-7xl flex-col justify-between gap-3 text-[10px] font-mono uppercase tracking-[0.25em] text-zinc-500 md:flex-row">
+            <span>// Secure_Channel_Active //</span>
+            <span>Digital Hotel Theme</span>
+            <span>Dashboard Session: Operational</span>
+          </div>
+        </footer>
+      </div>
+    </NavigationWrapper>
   );
 }
 
