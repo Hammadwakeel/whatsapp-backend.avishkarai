@@ -19,18 +19,21 @@
 ```
 inika-backend/
 ├── app/
-│   ├── api/           # Route handlers (auth, wiki, whatsapp)
+│   ├── api/           # Route handlers (auth, wiki, whatsapp, journey)
 │   ├── core/          # Config, security, database
-│   ├── models/        # SQLAlchemy models (tenant, wiki)
+│   ├── models/        # SQLAlchemy models (tenant, wiki, journey)
 │   ├── schemas/      # Pydantic schemas
-│   ├── services/     # Business logic (tenant, wiki, LLM, evolution)
+│   ├── services/     # Business logic (tenant, wiki, LLM, evolution, booking, journey)
 │   └── main.py       # FastAPI app entry
 ├── alembic/          # Database migrations
 ├── docs/             # Documentation
 │   ├── API.md        # Auth API reference
 │   ├── INTEGRATION.md # Frontend integration
 │   ├── WIKI.md       # Wiki system docs
-│   └── WHATSAPP.md   # WhatsApp/Evolution API docs
+│   ├── WHATSAPP.md   # WhatsApp/Evolution API docs
+│   ├── BOOKING.md    # Booking system docs
+│   ├── WEBHOOK.md    # Webhook integration docs
+│   └── JOURNEY.md    # Journey module docs
 ├── wiki/             # Wiki markdown files
 ├── tests/            # Unit & integration tests
 ├── docker-compose.evolution.yml  # Evolution API setup
@@ -47,6 +50,7 @@ inika-backend/
 - **WhatsApp Integration**: `docs/WHATSAPP.md`
 - **Webhook Integration**: `docs/WEBHOOK.md`
 - **Booking Integration**: `docs/BOOKING.md`
+- **Journey Module**: `docs/JOURNEY.md`
 - **Claude Skills**: `skills.md`
 - **Swagger UI**: `http://localhost:8000/docs`
 
@@ -65,6 +69,7 @@ inika-backend/
 | EVOLUTION_INSTANCE_NAME | No | Instance name for WhatsApp (default: inika) |
 | INIKA_API_KEY | No | External booking system API key |
 | INIKA_BOOKING_KEY | No | External booking system access key |
+| OPENWEATHER_API_KEY | No | OpenWeatherMap API key for weather data |
 
 ## Core Features
 
@@ -97,6 +102,22 @@ inika-backend/
 - Guest lookup by ID, phone, or room number
 - Journey tracking with milestones
 - Booking statistics and today's operations
+
+### Journey Module (Guest Engagement & Smart Messaging)
+- AI-powered contextual messaging to hotel guests
+- Time-based messages (morning, breakfast, lunch, dinner, evening)
+- Weather-based adaptations (sunny, rainy, cold recommendations)
+- Guest status messages (Due In, Welcome, Checkout, Feedback)
+- AI conversation support with RAG from wiki content
+- Rate limiting (max messages per guest per day)
+- Full message logging for compliance
+
+### Journey Database Tables
+- `journey_config` - Per-tenant journey configuration
+- `journey_schedule` - Scheduled message templates
+- `journey_message_log` - All sent/received messages
+- `journey_conversation` - Guest conversation threads
+- `journey_message` - Individual messages in conversations
 
 ## Database Tables
 

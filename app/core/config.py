@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     inika_api_key: str = ""
     inika_booking_key: str = ""
 
+    # Weather API (OpenWeatherMap)
+    openweather_api_key: str = ""
+
     class Config:
         env_file = ".env"
         case_sensitive = False

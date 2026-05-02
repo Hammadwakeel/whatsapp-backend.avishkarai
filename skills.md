@@ -121,6 +121,7 @@ async def handler(
 | EVOLUTION_API_KEY | No | Evolution API authentication |
 | INIKA_API_KEY | No | External booking API key |
 | INIKA_BOOKING_KEY | No | External booking access key |
+| OPENWEATHER_API_KEY | No | OpenWeatherMap API key for weather |
 
 **Important**: API keys (OpenRouter, Tavily) are SHARED, not per-tenant. All tenants use the same keys configured in environment variables.
 
@@ -146,17 +147,26 @@ async def handler(
 ### Booking Models (app/services/booking_service.py)
 - `GuestInventory` - Guest data synced from external booking API (per tenant)
 
+### Journey Models (app/models/journey.py)
+- `JourneyConfig` - Journey module configuration per tenant
+- `JourneySchedule` - Scheduled message templates
+- `JourneyMessageLog` - All sent/received messages
+- `JourneyConversation` - Guest conversation threads
+- `JourneyMessage` - Individual messages in conversations
+
 ---
 
 ## Key Directories
 
 | Directory | Purpose |
 |-----------|---------|
-| `app/api/` | Route handlers (auth, wiki, whatsapp, booking) |
+| `app/api/` | Route handlers (auth, wiki, whatsapp, booking, journey) |
 | `app/core/` | Config, database, security |
-| `app/models/` | SQLAlchemy models (tenant, user, wiki) |
-| `app/services/` | Business logic (tenant, wiki, LLM, evolution, booking) |
+| `app/models/` | SQLAlchemy models (tenant, user, wiki, journey) |
+| `app/services/` | Business logic (tenant, wiki, LLM, evolution, booking, journey) |
 | `app/api/booking.py` | Booking/external API integration |
+| `app/api/journey.py` | Journey/guest messaging endpoints |
+| `app/services/journey/` | Journey module services (weather, messaging, scheduling) |
 | `app/services/inika_client.py` | External Inika API client |
 | `app/services/booking_service.py` | Guest management service |
 
@@ -170,6 +180,7 @@ async def handler(
 | `docs/WHATSAPP.md` | WhatsApp frontend integration |
 | `docs/WEBHOOK.md` | Webhook endpoints for external systems |
 | `docs/BOOKING.md` | Booking system integration guide |
+| `docs/JOURNEY.md` | Journey module documentation |
 | `wiki/` | Markdown wiki files |
 | `docs/` | Documentation |
 
@@ -233,13 +244,16 @@ Repository: https://github.com/Hammadwakeel/whatsapp-backend.avishkarai.git
 2. **Phase 2: Shared API Keys** ✓ (Complete)
    - OpenRouter, Tavily keys from env (shared, not per-tenant)
 
-3. **Phase 3: Agent Configuration** (Pending)
-   - System prompt, personality prompt per tenant
+3. **Phase 3: Agent Configuration** ✓ (Complete)
+   - AgentConfig model for system/personality prompts
 
-4. **Phase 4: WhatsApp Sessions** (Pending)
-   - OpenClaw integration for WhatsApp
+4. **Phase 4: WhatsApp Integration** ✓ (Complete)
+   - Evolution API integration for WhatsApp gateway
 
-5. **Phase 5-10**: Message storage, knowledge base, RAG, admin UI
+5. **Phase 5: Journey Module** ✓ (Complete)
+   - AI-powered guest messaging (weather, time, status)
+   - RAG-enabled AI conversation support
+   - Message scheduling and broadcasting
 
 ---
 

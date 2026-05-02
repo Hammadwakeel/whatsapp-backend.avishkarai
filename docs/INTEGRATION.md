@@ -779,6 +779,363 @@ const getBookingStats = async () => {
 
 ---
 
+## Journey Module Integration (Guest Messaging)
+
+### Get Journey Configuration
+
+```javascript
+const getJourneyConfig = async () => {
+  const response = await fetch("http://localhost:8000/journey/config", {
+    headers: getAuthHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: {
+  //   id, tenant_id, is_enabled, hotel_city,
+  //   morning_message_hour, breakfast_hour, lunch_hour, dinner_hour, evening_hour,
+  //   enable_weather_based, enable_meal_reminders, enable_status_messages,
+  //   include_due_in, include_arrived, include_stayover, include_checkout_today
+  // }
+};
+```
+
+### Update Journey Configuration
+
+```javascript
+const updateJourneyConfig = async (updates) => {
+  const response = await fetch("http://localhost:8000/journey/config", {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(updates)
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+};
+
+// Example: Update city and enable weather-based messages
+updateJourneyConfig({
+  hotel_city: "Karachi",
+  enable_weather_based: true
+});
+```
+
+### Enable/Disable Journey Module
+
+```javascript
+const enableJourney = async () => {
+  const response = await fetch("http://localhost:8000/journey/config/enable", {
+    method: "POST",
+    headers: getAuthHeaders()
+  });
+  return response.json();
+};
+
+const disableJourney = async () => {
+  const response = await fetch("http://localhost:8000/journey/config/disable", {
+    method: "POST",
+    headers: getAuthHeaders()
+  });
+  return response.json();
+};
+```
+
+### Get Current Weather
+
+```javascript
+const getWeather = async (city) => {
+  const response = await fetch(
+    `http://localhost:8000/journey/weather?city=${encodeURIComponent(city)}`,
+    { headers: getAuthHeaders() }
+  );
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: { status, temperature, condition, description, city }
+};
+
+// Get weather by coordinates
+const getWeatherByCoords = async (lat, lon) => {
+  const response = await fetch(
+    `http://localhost:8000/journey/weather?lat=${lat}&lon=${lon}`,
+    { headers: getAuthHeaders() }
+  );
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+};
+```
+
+### List Active Guests
+
+```javascript
+const listJourneyGuests = async (statusFilter) => {
+  const url = statusFilter
+    ? `http://localhost:8000/journey/guests?status=${statusFilter}`
+    : "http://localhost:8000/journey/guests";
+
+  const response = await fetch(url, { headers: getAuthHeaders() });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: { guests: [{ id, gname, room, mobile, gstatus, cindate, coutdate }], total }
+};
+
+// Status filters: "DueIn", "Arrived", "StayOver", "Checkout"
+listJourneyGuests("Arrived,StayOver");
+```
+
+### Send Message to Guest
+
+```javascript
+const sendGuestMessage = async (guestId, messageType) => {
+  const response = await fetch("http://localhost:8000/journey/send", {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      guest_id: guestId,
+      message_type: messageType  // morning, lunch, dinner, welcome, etc.
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: { status, message_id, sent_to }
+};
+```
+
+### Broadcast Messages to All Guests
+
+```javascript
+const broadcastMessage = async (messageType) => {
+  const response = await fetch(
+    `http://localhost:8000/journey/send/broadcast?message_type=${messageType}`,
+    {
+      method: "POST",
+      headers: getAuthHeaders()
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: {
+  //   timestamp, message_type, weather,
+  //   guests_count, messages_sent, errors
+  // }
+};
+
+// Broadcast different message types
+broadcastMessage("morning");   // 8 AM - Weather + activities
+broadcastMessage("breakfast"); // 7 AM - Breakfast reminder
+broadcastMessage("lunch");     // 11 AM - Lunch announcement
+broadcastMessage("dinner");    // 6 PM - Dinner invitation
+broadcastMessage("evening");   // 8 PM - Evening activities
+```
+
+### Send Welcome Message
+
+```javascript
+const sendWelcome = async (guestId) => {
+  const response = await fetch(
+    `http://localhost:8000/journey/send/welcome/${guestId}`,
+    {
+      method: "POST",
+      headers: getAuthHeaders()
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: { message, status }
+};
+```
+
+### Send Due-In Message (Pre-Arrival)
+
+```javascript
+const sendDueInMessages = async () => {
+  const response = await fetch("http://localhost:8000/journey/send/due-in", {
+    method: "POST",
+    headers: getAuthHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: { timestamp, guests_count, messages_sent, errors }
+};
+```
+
+### Get Message Logs
+
+```javascript
+const getMessageLogs = async (limit = 50, offset = 0, messageType) => {
+  let url = `http://localhost:8000/journey/logs?limit=${limit}&offset=${offset}`;
+  if (messageType) {
+    url += `&message_type=${messageType}`;
+  }
+
+  const response = await fetch(url, { headers: getAuthHeaders() });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: { logs: [{ id, guest_name, room_number, message_type,
+  //                    direction, content, sent_at, delivered }], total, limit, offset }
+};
+```
+
+### AI Conversation with Guest
+
+```javascript
+const sendGuestConversation = async (mobile, message, tenantId) => {
+  const response = await fetch(
+    `http://localhost:8000/journey/conversation?tenant_id=${tenantId}&mobile=${encodeURIComponent(mobile)}&message=${encodeURIComponent(message)}`,
+    {
+      method: "POST",
+      headers: getAuthHeaders()
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: { response, guest_name, room, wiki_context }
+};
+```
+
+### Journey Dashboard Example (React)
+
+```jsx
+import { useState, useEffect } from 'react';
+
+export default function JourneyDashboard() {
+  const [config, setConfig] = useState(null);
+  const [guests, setGuests] = useState([]);
+  const [weather, setWeather] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      const [configRes, guestsRes, weatherRes] = await Promise.all([
+        fetch('/journey/config', { headers: getAuthHeaders() }),
+        fetch('/journey/guests', { headers: getAuthHeaders() }),
+        fetch('/journey/weather', { headers: getAuthHeaders() }),
+      ]);
+
+      setConfig(await configRes.json());
+      setGuests((await guestsRes.json()).guests);
+      setWeather(await weatherRes.json());
+      setLoading(false);
+    } catch (err) {
+      console.error('Failed to load:', err);
+    }
+  };
+
+  const toggleJourney = async (enable) => {
+    const url = enable ? '/journey/config/enable' : '/journey/config/disable';
+    await fetch(url, { method: 'POST', headers: getAuthHeaders() });
+    loadData();
+  };
+
+  const broadcastMessage = async (type) => {
+    const res = await fetch(`/journey/send/broadcast?message_type=${type}`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    const result = await res.json();
+    alert(`Sent ${result.messages_sent} messages`);
+    loadData();
+  };
+
+  if (loading) return <div>Loading...</div>;
+
+  return (
+    <div className="journey-dashboard">
+      <h2>Journey Messaging</h2>
+
+      <div className="status-card">
+        <h3>Current Status</h3>
+        <p>Enabled: {config?.is_enabled ? 'Yes' : 'No'}</p>
+        <p>Active Guests: {guests.length}</p>
+        {weather?.status === 'ok' && (
+          <p>Weather: {weather.temperature}C, {weather.condition}</p>
+        )}
+        <button onClick={() => toggleJourney(!config?.is_enabled)}>
+          {config?.is_enabled ? 'Disable' : 'Enable'} Journey
+        </button>
+      </div>
+
+      <div className="quick-actions">
+        <h3>Send Messages</h3>
+        <button onClick={() => broadcastMessage('morning')}>Morning</button>
+        <button onClick={() => broadcastMessage('lunch')}>Lunch</button>
+        <button onClick={() => broadcastMessage('dinner')}>Dinner</button>
+        <button onClick={() => broadcastMessage('evening')}>Evening</button>
+      </div>
+
+      <div className="guest-section">
+        <h3>Active Guests ({guests.length})</h3>
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Room</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {guests.map(guest => (
+              <tr key={guest.id}>
+                <td>{guest.gname}</td>
+                <td>{guest.room}</td>
+                <td>{guest.gstatus}</td>
+                <td>
+                  <button onClick={() => sendWelcome(guest.id)}>Welcome</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
 ## Error Handling
 
 ### Common Error Responses
