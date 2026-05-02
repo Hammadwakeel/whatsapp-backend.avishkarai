@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     evolution_api_key: str = ""
     evolution_instance_name: str = "inika"
 
+    # Inika External Booking API
+    inika_api_key: str = ""
+    inika_booking_key: str = ""
+
     class Config:
         env_file = ".env"
         case_sensitive = False

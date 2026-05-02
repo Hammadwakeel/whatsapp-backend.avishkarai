@@ -1,301 +1,635 @@
-# WhatsApp Integration - Evolution API
+# WhatsApp Integration - Frontend Guide
+
+Complete guide for integrating WhatsApp features into your frontend application.
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Authentication](#authentication)
+3. [Endpoints](#endpoints)
+4. [Frontend Components](#frontend-components)
+5. [Webhooks](#webhooks)
+6. [Error Handling](#error-handling)
+
+---
 
 ## Overview
 
-This document describes the WhatsApp integration using **Evolution API**, a free and open-source WhatsApp gateway solution.
+| Item | Value |
+|------|-------|
+| Base URL | `http://localhost:8000` |
+| Auth Required | Yes (JWT Bearer token) |
+| WhatsApp Gateway | Evolution API |
+| API Prefix | `/whatsapp` |
 
-## Why Evolution API?
+---
 
-| Feature | Benefit |
-|---------|---------|
-| ✅ Free & Open Source | No costs |
-| ✅ REST API | Easy to integrate |
-| ✅ Webhook Support | Real-time message handling |
-| ✅ Docker Support | Easy deployment |
-| ✅ Multi-instance | Support for multiple tenants |
-| ✅ QR via API | No UI needed |
+## Authentication
 
-## Architecture
+All WhatsApp endpoints require JWT authentication. Include the access token in the `Authorization` header:
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Your Frontend  │────▶│  Inika Backend   │────▶│  Evolution API  │
-│  (React/Next.js) │     │  (FastAPI)       │     │  (Docker)       │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-                               │                         │
-                               │                         ▼
-                               │                  ┌─────────────────┐
-                               │                  │   WhatsApp      │
-                               │                  │   (QR Scan)     │
-                               │                  └─────────────────┘
-                               ▼
-                        ┌─────────────────┐
-                        │   PostgreSQL    │
-                        │   (Sessions)    │
-                        └─────────────────┘
+Authorization: Bearer <access_token>
 ```
 
-## Setup
+Token is obtained from `/auth/login` or `/auth/register`.
 
-### 1. Start Evolution API
+---
 
-```bash
-# Using Docker Compose (included in project)
-docker-compose -f docker-compose.evolution.yml up -d
+## Endpoints
 
-# Or manually with Docker
-docker run -d \
-  --name evolution-api \
-  -p 8080:8080 \
-  -e SERVER_URL=http://localhost:8080 \
-  -e AUTHENTICATION_API_KEY=your-secure-api-key \
-  -v evolution-data:/evolution/instances \
-  atendai/evolution-api:latest
+### 1. Get Connection Status
+
+Check if WhatsApp is connected.
+
+**Endpoint**: `GET /whatsapp/status`
+
+**Headers**:
+```
+Authorization: Bearer <access_token>
 ```
 
-### 2. Configure Environment Variables
-
-Add these to your `.env` file:
-
-```env
-# Evolution API Configuration
-EVOLUTION_URL=http://localhost:8080
-EVOLUTION_API_KEY=your-secure-api-key
-EVOLUTION_INSTANCE_NAME=inika
+**Response** (200 OK):
+```json
+{
+  "is_connected": false,
+  "status": "disconnected",
+  "phone_number": null,
+  "display_name": null,
+  "session_id": "uuid"
+}
 ```
 
-### 3. Create Instance in Evolution API
+| Field | Type | Description |
+|-------|------|-------------|
+| is_connected | boolean | Whether WhatsApp is linked |
+| status | string | disconnected, connecting, connected |
+| phone_number | string/null | Connected phone number |
+| display_name | string/null | WhatsApp display name |
+| session_id | string | Local session identifier |
 
-```bash
-# Create a new instance
-curl -X POST http://localhost:8080/instance/create \
-  -H "apikey: your-secure-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "instanceName": "inika",
-    "integration": "WHATSAPP-BAILEY"
-  }'
+---
+
+### 2. Connect WhatsApp (Generate QR)
+
+Start WhatsApp connection by generating a QR code.
+
+**Endpoint**: `POST /whatsapp/connect`
+
+**Headers**:
+```
+Authorization: Bearer <access_token>
 ```
 
-### 4. Connect Webhook
-
-Point Evolution API webhook to your backend:
-
-```bash
-# Set webhook URL
-curl -X POST http://localhost:8080/webhook/set \
-  -H "apikey: your-secure-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "webhook": {
-      "url": "https://your-backend-url.com/whatsapp/webhook",
-      "events": ["MESSAGES_UPSERT", "CONNECTION_UPDATE"]
-    }
-  }'
-```
-
-## API Endpoints
-
-### Get QR Code
-```
-GET /api/v1/whatsapp/qr
-Authorization: Bearer <tenant_token>
-
-Response:
+**Response** (200 OK - QR available):
+```json
 {
   "status": "qr_available",
   "qr_code": "base64_encoded_qr_image",
-  "message": "Scan this QR code with WhatsApp"
+  "message": "Scan this QR code with WhatsApp",
+  "local_session_id": "uuid"
 }
 ```
 
-### Get QR as Image
-```
-GET /api/v1/whatsapp/qr/image
-Authorization: Bearer <tenant_token>
-
-Response: PNG image
-```
-
-### Get Connection Status
-```
-GET /api/v1/whatsapp/status
-Authorization: Bearer <tenant_token>
-
-Response:
+**Response** (200 OK - Already connected):
+```json
 {
-  "is_connected": true,
-  "status": "CONNECTED",
-  "phone_number": "+1234567890",
-  "display_name": "Hotel Name",
-  ...
+  "status": "connected",
+  "message": "WhatsApp is already connected",
+  "connected": true
 }
 ```
 
-### Connect WhatsApp
+**Response** (200 OK - Waiting for QR):
+```json
+{
+  "status": "waiting",
+  "message": "Generating QR code...",
+  "evolution_url": "http://localhost:8080",
+  "instance_name": "inika",
+  "local_session_id": "uuid"
+}
 ```
-POST /api/v1/whatsapp/connect
-Authorization: Bearer <tenant_token>
 
-Response:
+---
+
+### 3. Get QR Code Info
+
+Get current QR code status and data.
+
+**Endpoint**: `GET /whatsapp/qr`
+
+**Headers**:
+```
+Authorization: Bearer <access_token>
+```
+
+**Response** (200 OK):
+```json
 {
   "status": "qr_available",
-  "qr_code": "...",
-  "message": "Scan this QR code with WhatsApp"
+  "qr_code": "base64_encoded_qr_image",
+  "qr_image": "base64_encoded_qr_image",
+  "message": "QR code ready"
 }
 ```
 
-### Disconnect WhatsApp
-```
-POST /api/v1/whatsapp/disconnect
-Authorization: Bearer <tenant_token>
+---
 
-Response:
+### 4. Get QR Code as Image
+
+Get QR code as PNG image.
+
+**Endpoint**: `GET /whatsapp/qr/image`
+
+**Headers**:
+```
+Authorization: Bearer <access_token>
+```
+
+**Response**: PNG image file
+
+**Example**:
+```html
+<img src="/whatsapp/qr/image" alt="WhatsApp QR Code" />
+```
+
+---
+
+### 5. Disconnect WhatsApp
+
+Disconnect current WhatsApp session.
+
+**Endpoint**: `POST /whatsapp/disconnect`
+
+**Headers**:
+```
+Authorization: Bearer <access_token>
+```
+
+**Response** (200 OK):
+```json
 {
   "message": "WhatsApp disconnected successfully"
 }
 ```
 
-### Get Messages
-```
-GET /api/v1/whatsapp/messages?page=1&page_size=50&direction=inbound
-Authorization: Bearer <tenant_token>
+---
 
-Response:
+### 6. Get WhatsApp Session
+
+Get or create local WhatsApp session.
+
+**Endpoint**: `GET /whatsapp/session`
+
+**Headers**:
+```
+Authorization: Bearer <access_token>
+```
+
+**Response** (200 OK):
+```json
 {
-  "messages": [...],
+  "id": "uuid",
+  "tenant_id": "uuid",
+  "status": "disconnected",
+  "phone_number": null,
+  "created_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-01T00:00:00Z"
+}
+```
+
+---
+
+### 7. Get Messages
+
+Get message history with pagination.
+
+**Endpoint**: `GET /whatsapp/messages`
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| page | int | 1 | Page number |
+| page_size | int | 50 | Items per page (max 100) |
+| direction | string | null | Filter: `inbound` or `outbound` |
+
+**Headers**:
+```
+Authorization: Bearer <access_token>
+```
+
+**Example**: `GET /whatsapp/messages?page=1&page_size=20&direction=inbound`
+
+**Response** (200 OK):
+```json
+{
+  "messages": [
+    {
+      "id": "uuid",
+      "session_id": "uuid",
+      "message_id": "external_message_id",
+      "direction": "inbound",
+      "from_number": "+1234567890",
+      "to_number": "+0987654321",
+      "content": "Hello, I need help with my reservation",
+      "agent_response": "I'd be happy to help with your reservation...",
+      "wiki_sources": {"sources": ["page-1", "page-2"]},
+      "web_search_used": false,
+      "is_read": false,
+      "created_at": "2024-01-01T12:00:00Z"
+    }
+  ],
   "total": 100,
   "page": 1,
   "page_size": 50
 }
 ```
 
-### Webhook (for Evolution API)
+---
+
+### 8. Webhook Configuration (Receive Messages)
+
+Endpoint for Evolution API to send incoming messages.
+
+**Endpoint**: `POST /whatsapp/webhook`
+
+**Headers**: None required (configured externally)
+
+**Request Body** (from Evolution API):
+```json
+{
+  "event": "MESSAGES_UPSERT",
+  "session": "inika",
+  "data": {
+    "message": {
+      "key": {
+        "remoteJid": "1234567890@s.whatsapp.net",
+        "fromMe": false,
+        "id": "message_id"
+      },
+      "message": {
+        "conversation": "Hello, I need help"
+      }
+    }
+  }
+}
 ```
-POST /api/v1/whatsapp/webhook
 
-This endpoint receives messages from WhatsApp via Evolution API.
-Configure this URL in Evolution API dashboard.
+**Response**:
+```json
+{
+  "status": "ok",
+  "processed": true
+}
 ```
 
-## Frontend Integration
+---
 
-### React Component Example
+## Frontend Components
+
+### React - WhatsApp Connection Manager
 
 ```jsx
 import { useState, useEffect } from 'react';
 
-export default function WhatsAppQR() {
+export default function WhatsAppManager() {
+  const [status, setStatus] = useState(null);
   const [qrImage, setQrImage] = useState(null);
-  const [status, setStatus] = useState('loading');
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const getAuthHeaders = () => ({
+    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+  });
+
   useEffect(() => {
-    fetchQRCode();
+    checkStatus();
   }, []);
 
-  const fetchQRCode = async () => {
+  const checkStatus = async () => {
     try {
-      const response = await fetch('/api/v1/whatsapp/qr', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+      const response = await fetch('/whatsapp/status', {
+        headers: getAuthHeaders()
       });
       const data = await response.json();
+      setStatus(data);
+      setLoading(false);
 
-      if (data.status === 'qr_available' && data.qr_code) {
-        setQrImage(`data:image/png;base64,${data.qr_code}`);
-        setStatus('scan');
-      } else if (data.status === 'connected') {
-        setStatus('connected');
-      } else {
-        setError(data.message);
-        setStatus('error');
+      if (!data.is_connected) {
+        fetchQRCode();
       }
     } catch (err) {
       setError(err.message);
-      setStatus('error');
+      setLoading(false);
     }
   };
 
-  if (status === 'loading') return <div>Loading...</div>;
-  if (status === 'connected') return <div>WhatsApp Connected!</div>;
-  if (status === 'error') return <div>Error: {error}</div>;
+  const fetchQRCode = async () => {
+    try {
+      const response = await fetch('/whatsapp/qr', {
+        headers: getAuthHeaders()
+      });
+      const data = await response.json();
+
+      if (data.qr_code) {
+        setQrImage(`data:image/png;base64,${data.qr_code}`);
+      }
+    } catch (err) {
+      console.error('Failed to fetch QR:', err);
+    }
+  };
+
+  const connect = async () => {
+    try {
+      const response = await fetch('/whatsapp/connect', {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
+      const data = await response.json();
+
+      if (data.qr_code) {
+        setQrImage(`data:image/png;base64,${data.qr_code}`);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const disconnect = async () => {
+    if (!confirm('Disconnect WhatsApp?')) return;
+
+    try {
+      await fetch('/whatsapp/disconnect', {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
+      checkStatus();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error}</div>;
 
   return (
-    <div>
-      <h2>Scan QR Code</h2>
-      {qrImage && <img src={qrImage} alt="WhatsApp QR" />}
-      <p>Open WhatsApp → Linked Devices → Scan QR</p>
-      <button onClick={fetchQRCode}>Refresh QR</button>
+    <div className="whatsapp-manager">
+      <h2>WhatsApp Connection</h2>
+
+      {status?.is_connected ? (
+        <div className="connected">
+          <p>✅ WhatsApp Connected</p>
+          <p>Phone: {status.phone_number}</p>
+          <p>Status: {status.status}</p>
+          <button onClick={disconnect}>Disconnect</button>
+        </div>
+      ) : (
+        <div className="disconnected">
+          <p>❌ WhatsApp Not Connected</p>
+
+          {qrImage ? (
+            <div className="qr-container">
+              <img src={qrImage} alt="Scan this QR" />
+              <p>Scan with WhatsApp → Linked Devices → Link a Device</p>
+              <button onClick={fetchQRCode}>Refresh QR</button>
+            </div>
+          ) : (
+            <button onClick={connect}>Generate QR Code</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 ```
 
-### Using the Image Endpoint
+### React - Message History
 
 ```jsx
-// Simpler approach - just display the image
-<img src="/api/v1/whatsapp/qr/image" alt="WhatsApp QR" />
+import { useState, useEffect } from 'react';
+
+export default function MessageHistory() {
+  const [messages, setMessages] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [filter, setFilter] = useState('all');
+
+  const getAuthHeaders = () => ({
+    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+  });
+
+  useEffect(() => {
+    fetchMessages();
+  }, [page, filter]);
+
+  const fetchMessages = async () => {
+    const direction = filter === 'all' ? '' : `&direction=${filter}`;
+    const response = await fetch(
+      `/whatsapp/messages?page=${page}&page_size=20${direction}`,
+      { headers: getAuthHeaders() }
+    );
+    const data = await response.json();
+    setMessages(data.messages);
+    setTotal(data.total);
+  };
+
+  return (
+    <div className="message-history">
+      <h2>Message History</h2>
+
+      <div className="filters">
+        <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+          <option value="all">All Messages</option>
+          <option value="inbound">Inbound Only</option>
+          <option value="outbound">Outbound Only</option>
+        </select>
+
+        <span>Page {page} of {Math.ceil(total / 20)}</span>
+
+        <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </button>
+        <button disabled={page * 20 >= total} onClick={() => setPage(p => p + 1)}>
+          Next
+        </button>
+      </div>
+
+      <div className="messages">
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`message ${msg.direction}`}
+          >
+            <span className="direction">{msg.direction}</span>
+            <span className="from">{msg.from_number}</span>
+            <p className="content">{msg.content}</p>
+            {msg.agent_response && (
+              <p className="response"><strong>AI Response:</strong> {msg.agent_response}</p>
+            )}
+            <span className="time">{new Date(msg.created_at).toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 ```
 
-## Multi-Tenant Support
+### Vue 3 - WhatsApp Composable
 
-### Option 1: Single WhatsApp (Shared)
+```javascript
+// composables/useWhatsApp.js
+import { ref } from 'vue';
 
-All tenants share the same WhatsApp connection. Messages are routed based on phone number.
+export function useWhatsApp() {
+  const status = ref(null);
+  const qrCode = ref(null);
+  const loading = ref(false);
+  const error = ref(null);
 
-### Option 2: Per-Tenant WhatsApp (Multiple Instances)
+  const getAuthHeaders = () => ({
+    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+  });
 
-Run multiple Evolution API instances, one per tenant:
+  const checkStatus = async () => {
+    loading.value = true;
+    try {
+      const response = await fetch('/whatsapp/status', {
+        headers: getAuthHeaders()
+      });
+      status.value = await response.json();
+    } catch (err) {
+      error.value = err.message;
+    }
+    loading.value = false;
+  };
 
-```yaml
-# docker-compose.yml for multi-tenant
-services:
-  evolution-tenant1:
-    image: atendai/evolution-api:latest
-    environment:
-      - INSTANCE_NAME=tenant1
-    ports:
-      - "8081:8080"
+  const connect = async () => {
+    loading.value = true;
+    try {
+      const response = await fetch('/whatsapp/connect', {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
+      const data = await response.json();
 
-  evolution-tenant2:
-    image: atendai/evolution-api:latest
-    environment:
-      - INSTANCE_NAME=tenant2
-    ports:
-      - "8082:8080"
+      if (data.qr_code) {
+        qrCode.value = `data:image/png;base64,${data.qr_code}`;
+      }
+    } catch (err) {
+      error.value = err.message;
+    }
+    loading.value = false;
+  };
+
+  const disconnect = async () => {
+    loading.value = true;
+    try {
+      await fetch('/whatsapp/disconnect', {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
+      await checkStatus();
+    } catch (err) {
+      error.value = err.message;
+    }
+    loading.value = false;
+  };
+
+  return {
+    status,
+    qrCode,
+    loading,
+    error,
+    checkStatus,
+    connect,
+    disconnect
+  };
+}
 ```
 
-## Troubleshooting
+---
 
-### QR Code Not Showing
+## Webhooks
 
-1. Check Evolution API is running: `curl http://localhost:8080/health`
-2. Check instance exists: `curl http://localhost:8080/instance/connectionState/inika`
-3. Check API key is correct in `.env`
+### Incoming Messages
+
+When a customer sends a WhatsApp message:
+
+1. Evolution API forwards it to `/whatsapp/webhook`
+2. Backend records the message
+3. AI agent generates a response
+4. Response is sent back via Evolution API to the customer
+
+### Webhook Response Format
+
+The webhook endpoint returns:
+```json
+{
+  "message": "Response text from AI agent",
+  "agent_response": "Response text from AI agent",
+  "sources": ["page-1", "page-2"],
+  "success": true
+}
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+| Status | Error | Solution |
+|--------|-------|----------|
+| 401 | Not authenticated | Login and include token |
+| 404 | Session not found | Call `/whatsapp/connect` first |
+| 500 | Evolution API error | Check Evolution API is running |
 
 ### Connection Issues
 
-1. Ensure webhook is properly configured
-2. Check Evolution API logs: `docker logs evolution-api`
-3. Verify WhatsApp isn't connected elsewhere
+1. **QR not showing**: Call `POST /whatsapp/connect` to regenerate
+2. **Connection drops**: Check Evolution API logs
+3. **Messages not received**: Verify webhook is configured
 
-### Message Not Received
+### Status Polling
 
-1. Check webhook URL is publicly accessible
-2. Verify webhook events are enabled
-3. Check Evolution API dashboard for incoming messages
+For real-time updates, poll `/whatsapp/status` every 5 seconds during QR scanning:
 
-## Evolution API Documentation
+```javascript
+// Poll status until connected
+const pollStatus = async () => {
+  const interval = setInterval(async () => {
+    const response = await fetch('/whatsapp/status', {
+      headers: getAuthHeaders()
+    });
+    const data = await response.json();
 
-For more details, visit: https://doc.evolution-api.com/
+    if (data.is_connected) {
+      clearInterval(interval);
+      // Connected!
+    }
+  }, 5000);
+};
+```
+
+---
+
+## Multi-Tenant Isolation
+
+Each tenant has isolated WhatsApp data:
+- Hotel A's messages are not visible to Hotel B
+- `tenant_id` is extracted from JWT token
+- Sessions are created per tenant
+
+---
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `EVOLUTION_URL` | Evolution API URL | http://localhost:8080 |
-| `EVOLUTION_API_KEY` | API Key for authentication | - |
+| `EVOLUTION_API_KEY` | API authentication key | - |
 | `EVOLUTION_INSTANCE_NAME` | Instance name | inika |

@@ -641,6 +641,144 @@ const deleteAgentConfig = async () => {
 
 ---
 
+## Booking System Integration (External API)
+
+### Sync Guests from External Booking System
+
+```javascript
+const syncGuests = async () => {
+  const response = await fetch("http://localhost:8000/booking/sync", {
+    method: "POST",
+    headers: getAuthHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json(); // { status, synced, total }
+};
+```
+
+### List All Guests
+
+```javascript
+const listGuests = async (statusFilter) => {
+  const url = statusFilter
+    ? `http://localhost:8000/booking/guests?status=${statusFilter}`
+    : "http://localhost:8000/booking/guests";
+
+  const response = await fetch(url, { headers: getAuthHeaders() });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json(); // { guests: [...], total: 45 }
+};
+```
+
+### Get Today's Bookings
+
+```javascript
+const getTodayBookings = async () => {
+  const response = await fetch("http://localhost:8000/booking/guests/today", {
+    headers: getAuthHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json(); // { bookings: [...], total: 5 }
+};
+```
+
+### Find Guest by Phone
+
+```javascript
+const findGuestByPhone = async (mobile) => {
+  const response = await fetch(
+    `http://localhost:8000/booking/guests/phone/${encodeURIComponent(mobile)}`,
+    { headers: getAuthHeaders() }
+  );
+
+  if (response.status === 404) {
+    return null; // Guest not found
+  }
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json(); // Guest object
+};
+```
+
+### Find Guest by Room
+
+```javascript
+const findGuestByRoom = async (roomNumber) => {
+  const response = await fetch(
+    `http://localhost:8000/booking/guests/room/${encodeURIComponent(roomNumber)}`,
+    { headers: getAuthHeaders() }
+  );
+
+  if (response.status === 404) {
+    return null; // No active guest in this room
+  }
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json(); // Guest object
+};
+```
+
+### Get Guest Journey
+
+```javascript
+const getGuestJourney = async (guestId) => {
+  const response = await fetch(
+    `http://localhost:8000/booking/guests/${guestId}/journey`,
+    { headers: getAuthHeaders() }
+  );
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: {
+  //   guest_name, room, check_in, check_out, status,
+  //   milestones: [{ name, completed, time?, scheduled? }]
+  // }
+};
+```
+
+### Get Booking Statistics
+
+```javascript
+const getBookingStats = async () => {
+  const response = await fetch("http://localhost:8000/booking/stats", {
+    headers: getAuthHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.json()).detail);
+  }
+
+  return response.json();
+  // Returns: {
+  //   total_active, arrived, confirmed, stayover, due_in,
+  //   today_checkins, today_checkouts
+  // }
+};
+```
+
+---
+
 ## Error Handling
 
 ### Common Error Responses

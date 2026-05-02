@@ -117,6 +117,10 @@ async def handler(
 | TAVILY_API_KEY | Yes | SHARED across all tenants - Web search |
 | LLM_MODEL | No | Default: anthropic/claude-3-haiku |
 | WIKI_PATH | No | Default: wiki |
+| EVOLUTION_URL | No | Evolution API URL (WhatsApp gateway) |
+| EVOLUTION_API_KEY | No | Evolution API authentication |
+| INIKA_API_KEY | No | External booking API key |
+| INIKA_BOOKING_KEY | No | External booking access key |
 
 **Important**: API keys (OpenRouter, Tavily) are SHARED, not per-tenant. All tenants use the same keys configured in environment variables.
 
@@ -139,17 +143,33 @@ async def handler(
 - `WikiLink` - Cross-references between pages (per tenant via tenant_id)
 - `WikiLog` - Operation history (per tenant via tenant_id)
 
+### Booking Models (app/services/booking_service.py)
+- `GuestInventory` - Guest data synced from external booking API (per tenant)
+
 ---
 
 ## Key Directories
 
 | Directory | Purpose |
 |-----------|---------|
-| `app/api/` | Route handlers (auth, wiki) |
+| `app/api/` | Route handlers (auth, wiki, whatsapp, booking) |
 | `app/core/` | Config, database, security |
 | `app/models/` | SQLAlchemy models (tenant, user, wiki) |
-| `app/schemas/` | Pydantic schemas (tenant, wiki) |
-| `app/services/` | Business logic (tenant, wiki, LLM) |
+| `app/services/` | Business logic (tenant, wiki, LLM, evolution, booking) |
+| `app/api/booking.py` | Booking/external API integration |
+| `app/services/inika_client.py` | External Inika API client |
+| `app/services/booking_service.py` | Guest management service |
+
+## Documentation
+
+| File | Purpose |
+|------|---------|
+| `docs/API.md` | Auth, Wiki, Agent, WhatsApp, Booking endpoints |
+| `docs/INTEGRATION.md` | Frontend integration examples |
+| `docs/WIKI.md` | Wiki system documentation |
+| `docs/WHATSAPP.md` | WhatsApp frontend integration |
+| `docs/WEBHOOK.md` | Webhook endpoints for external systems |
+| `docs/BOOKING.md` | Booking system integration guide |
 | `wiki/` | Markdown wiki files |
 | `docs/` | Documentation |
 

@@ -45,6 +45,8 @@ inika-backend/
 - **Frontend Integration**: `docs/INTEGRATION.md`
 - **Wiki API**: `docs/WIKI.md`
 - **WhatsApp Integration**: `docs/WHATSAPP.md`
+- **Webhook Integration**: `docs/WEBHOOK.md`
+- **Booking Integration**: `docs/BOOKING.md`
 - **Claude Skills**: `skills.md`
 - **Swagger UI**: `http://localhost:8000/docs`
 
@@ -61,6 +63,8 @@ inika-backend/
 | EVOLUTION_URL | No | Evolution API URL (default: http://localhost:8080) |
 | EVOLUTION_API_KEY | No | Evolution API authentication key |
 | EVOLUTION_INSTANCE_NAME | No | Instance name for WhatsApp (default: inika) |
+| INIKA_API_KEY | No | External booking system API key |
+| INIKA_BOOKING_KEY | No | External booking system access key |
 
 ## Core Features
 
@@ -87,6 +91,12 @@ inika-backend/
 - QR code generation via API
 - Webhook support for incoming messages
 - Message history and session management
+
+### Booking System (External API Integration)
+- Sync guest inventory from external booking system
+- Guest lookup by ID, phone, or room number
+- Journey tracking with milestones
+- Booking statistics and today's operations
 
 ## Database Tables
 
@@ -123,7 +133,7 @@ docker-compose up
 alembic upgrade head
 
 # Start Evolution API (WhatsApp gateway)
-docker-compose -f docker-compose.evolution.yml up -d
+docker-compose up -d
 ```
 
 ## Key Dependencies

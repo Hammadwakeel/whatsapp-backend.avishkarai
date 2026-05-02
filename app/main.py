@@ -9,6 +9,7 @@ from app.api import wiki_router
 from app.api.agent import router as agent_router
 from app.api.whatsapp import router as whatsapp_router
 from app.api.webhook import router as webhook_router
+from app.api.booking import router as booking_router
 
 settings = get_settings()
 
@@ -47,6 +48,7 @@ app.include_router(wiki_router)
 app.include_router(agent_router)
 app.include_router(whatsapp_router)
 app.include_router(webhook_router)
+app.include_router(booking_router)
 
 
 @app.get("/health")

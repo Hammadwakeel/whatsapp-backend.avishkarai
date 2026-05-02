@@ -33,9 +33,9 @@ class TestWhatsAppConnect:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "id" in data
-        assert "tenant_id" in data
-        assert data["status"] in ["connecting", "connected", "error"]
+        assert "local_session_id" in data
+        assert "status" in data
+        assert data["status"] in ["connecting", "connected", "qr_available", "waiting", "error"]
 
 
 class TestWhatsAppDisconnect:
@@ -114,7 +114,7 @@ class TestWhatsAppMultiTenant:
             headers={"Authorization": f"Bearer {auth_tokens['access_token']}"}
         )
         assert session_a.status_code == 200
-        hotel_a_session_id = session_a.json()["id"]
+        hotel_a_session_id = session_a.json()["local_session_id"]
 
         # Hotel B connects
         session_b = await client.post(
@@ -122,7 +122,7 @@ class TestWhatsAppMultiTenant:
             headers={"Authorization": f"Bearer {hotel_b_tokens['access_token']}"}
         )
         assert session_b.status_code == 200
-        hotel_b_session_id = session_b.json()["id"]
+        hotel_b_session_id = session_b.json()["local_session_id"]
 
         # Verify different sessions
         assert hotel_a_session_id != hotel_b_session_id

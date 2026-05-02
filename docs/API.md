@@ -19,9 +19,11 @@ Multi-Tenant Hotel Platform with WhatsApp AI Agent integration.
 2. [Profile](#profile) - Tenant profile management
 3. [Wiki](#wiki) - Knowledge base API
 4. [Agent Configuration](#agent-configuration) - AI agent configuration
-5. [Health](#health) - Health check endpoints
-6. [Data Models](#data-models)
-7. [Error Responses](#error-responses)
+5. [WhatsApp](#whatsapp) - WhatsApp connection and messaging
+6. [Booking](#booking) - External booking system integration
+7. [Health](#health) - Health check endpoints
+8. [Data Models](#data-models)
+9. [Error Responses](#error-responses)
 
 ---
 
@@ -576,6 +578,292 @@ Get the current configuration status.
   "has_system_prompt": true,
   "has_personality_prompt": false,
   "config_id": "uuid"
+}
+```
+
+---
+
+## WhatsApp
+
+All WhatsApp endpoints require authentication with `Authorization: Bearer <token>`.
+
+### Get Connection Status
+
+Check if WhatsApp is connected.
+
+**Endpoint**: `GET /whatsapp/status`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response** (200 OK):
+```json
+{
+  "is_connected": false,
+  "status": "disconnected",
+  "phone_number": null,
+  "display_name": null,
+  "session_id": "uuid"
+}
+```
+
+---
+
+### Connect WhatsApp
+
+Generate QR code and connect WhatsApp.
+
+**Endpoint**: `POST /whatsapp/connect`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response** (200 OK - QR available):
+```json
+{
+  "status": "qr_available",
+  "qr_code": "base64_encoded_qr_image",
+  "message": "Scan this QR code with WhatsApp",
+  "local_session_id": "uuid"
+}
+```
+
+**Response** (200 OK - Already connected):
+```json
+{
+  "status": "connected",
+  "message": "WhatsApp is already connected",
+  "connected": true
+}
+```
+
+---
+
+### Get QR Code
+
+Get current QR code data.
+
+**Endpoint**: `GET /whatsapp/qr`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response** (200 OK):
+```json
+{
+  "status": "qr_available",
+  "qr_code": "base64_encoded_qr_image",
+  "message": "QR code ready"
+}
+```
+
+---
+
+### Get QR Code as Image
+
+Get QR code as PNG image.
+
+**Endpoint**: `GET /whatsapp/qr/image`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response**: PNG image file
+
+---
+
+### Disconnect WhatsApp
+
+Disconnect current WhatsApp session.
+
+**Endpoint**: `POST /whatsapp/disconnect`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response** (200 OK):
+```json
+{
+  "message": "WhatsApp disconnected successfully"
+}
+```
+
+---
+
+### Get WhatsApp Session
+
+Get or create local WhatsApp session.
+
+**Endpoint**: `GET /whatsapp/session`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response** (200 OK):
+```json
+{
+  "id": "uuid",
+  "tenant_id": "uuid",
+  "status": "disconnected",
+  "phone_number": null,
+  "created_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-01T00:00:00Z"
+}
+```
+
+---
+
+### Get Messages
+
+Get message history with pagination.
+
+**Endpoint**: `GET /whatsapp/messages`
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| page | int | 1 | Page number |
+| page_size | int | 50 | Items per page (max 100) |
+| direction | string | null | Filter: `inbound` or `outbound` |
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response** (200 OK):
+```json
+{
+  "messages": [
+    {
+      "id": "uuid",
+      "direction": "inbound",
+      "from_number": "+1234567890",
+      "content": "Hello, I need help",
+      "agent_response": "I'd be happy to help...",
+      "created_at": "2024-01-01T12:00:00Z"
+    }
+  ],
+  "total": 100,
+  "page": 1,
+  "page_size": 50
+}
+```
+
+---
+
+## Booking (External Integration)
+
+All booking endpoints require authentication with `Authorization: Bearer <token>`.
+Guest data is synced from external booking system via Inika API.
+
+### Sync Guests
+
+Fetch and sync guest inventory from external booking API.
+
+**Endpoint**: `POST /booking/sync`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+**Response** (200 OK):
+```json
+{
+  "status": "ok",
+  "synced": 50,
+  "total": 50
+}
+```
+
+---
+
+### Fetch Guests (Raw)
+
+Get raw guest data from external API without syncing.
+
+**Endpoint**: `GET /booking/fetch`
+
+**Headers**: `Authorization: Bearer <access_token>`
+
+---
+
+### List Guests
+
+**Endpoint**: `GET /booking/guests`
+
+**Query Parameters**:
+- `status` (optional): Filter by status (Arrived, Confirmed, StayOver, Due In)
+
+**Response** (200 OK):
+```json
+{
+  "guests": [...],
+  "total": 45
+}
+```
+
+---
+
+### Today's Bookings
+
+**Endpoint**: `GET /booking/guests/today`
+
+**Response** (200 OK):
+```json
+{
+  "bookings": [...],
+  "total": 5
+}
+```
+
+---
+
+### Get Guest by ID
+
+**Endpoint**: `GET /booking/guests/{guest_id}`
+
+**Response** (200 OK): Guest object
+
+---
+
+### Get Guest by Room
+
+**Endpoint**: `GET /booking/guests/room/{room}`
+
+**Response** (200 OK): Guest object | 404 if not found
+
+---
+
+### Get Guest by Phone
+
+**Endpoint**: `GET /booking/guests/phone/{mobile}`
+
+**Response** (200 OK): Guest object | 404 if not found
+
+---
+
+### Get Guest Journey
+
+**Endpoint**: `GET /booking/guests/{guest_id}/journey`
+
+**Response** (200 OK):
+```json
+{
+  "guest_name": "John Doe",
+  "room": "101",
+  "check_in": "2024-01-15",
+  "check_out": "2024-01-18",
+  "status": "StayOver",
+  "milestones": [...]
+}
+```
+
+---
+
+### Booking Statistics
+
+**Endpoint**: `GET /booking/stats`
+
+**Response** (200 OK):
+```json
+{
+  "total_active": 45,
+  "arrived": 10,
+  "confirmed": 15,
+  "stayover": 20,
+  "due_in": 5,
+  "today_checkins": 8,
+  "today_checkouts": 3
 }
 ```
 

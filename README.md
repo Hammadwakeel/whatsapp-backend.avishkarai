@@ -53,6 +53,9 @@ uvicorn app.main:app --reload
 - Auth API: `docs/API.md`
 - Integration Guide: `docs/INTEGRATION.md`
 - Wiki System: `docs/WIKI.md`
+- WhatsApp: `docs/WHATSAPP.md`
+- Webhooks: `docs/WEBHOOK.md`
+- Booking: `docs/BOOKING.md`
 
 ## GitHub
 

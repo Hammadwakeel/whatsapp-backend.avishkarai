@@ -1,8 +1,10 @@
 version: "3.9"
 
 services:
+  # Main PostgreSQL database for Inika backend
   db:
     image: postgres:16-alpine
+    container_name: inika-db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -17,13 +19,67 @@ services:
       timeout: 5s
       retries: 5
 
+  # Evolution API for WhatsApp gateway
+  evolution-api:
+    image: atendai/evolution-api:latest
+    container_name: evolution-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Server Configuration
+      - SERVER_URL=http://localhost:8080
+      - AUTHENTICATION_API_KEY=4c2cf19117688020b1fba930f2332e99cfb1c17528a297104783563a19c3c231
+
+      # Database (PostgreSQL - SQLite is not supported)
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://postgres:postgres@evolution-db:5432/evolution?schema=public
+
+      # Webhook Configuration
+      - WEBHOOK_GLOBAL_ENABLED=false
+      - WEBHOOK_GLOBAL_URL=
+      - WEBHOOK_EVENTS_ON=true
+
+      # QR Code Settings
+      - QR_CODE_LIMIT=30
+      - QR_CODE_COLOR=#000000
+
+      # Additional Settings
+      - LOG_LEVEL=info
+      - DEL_INSTANCE=false
+    volumes:
+      - evolution-data:/evolution/instances
+    depends_on:
+      evolution-db:
+        condition: service_healthy
+
+  # PostgreSQL for Evolution API
+  evolution-db:
+    image: postgres:15-alpine
+    container_name: evolution-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=evolution
+    volumes:
+      - evolution-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Inika Backend API (optional, for Docker deployment)
   api:
     build: .
     ports:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/inika_db
-      - SECRET_KEY=${SECRET_KEY}
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - EVOLUTION_URL=http://evolution-api:8080
+      - EVOLUTION_API_KEY=4c2cf19117688020b1fba930f2332e99cfb1c17528a297104783563a19c3c231
     depends_on:
       db:
         condition: service_healthy
@@ -33,3 +89,5 @@ services:
 
 volumes:
   postgres_data:
+  evolution-data:
+  evolution-postgres:
