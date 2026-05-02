@@ -16,6 +16,11 @@ from app.schemas.agent import (
     AgentConfigCreate, AgentConfigUpdate, AgentConfigResponse,
     AgentTestRequest, AgentTestResponse,
 )
+from app.schemas.whatsapp import (
+    WhatsAppSessionCreate, WhatsAppSessionUpdate, WhatsAppSessionResponse,
+    WhatsAppStatusResponse, QRCodeResponse,
+    WhatsAppMessageCreate, WhatsAppMessageResponse, MessageListResponse,
+)
 
 __all__ = [
     "TenantCreate", "TenantLogin", "TenantUpdate", "TenantResponse", "TokenResponse",
@@ -26,4 +31,7 @@ __all__ = [
     "IndexResponse", "LogEntry", "LogListResponse",
     "AgentConfigCreate", "AgentConfigUpdate", "AgentConfigResponse",
     "AgentTestRequest", "AgentTestResponse",
+    "WhatsAppSessionCreate", "WhatsAppSessionUpdate", "WhatsAppSessionResponse",
+    "WhatsAppStatusResponse", "QRCodeResponse",
+    "WhatsAppMessageCreate", "WhatsAppMessageResponse", "MessageListResponse",
 ]

@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  evolution-api:
+    image: atendai/evolution-api:latest
+    container_name: evolution-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Server Configuration
+      - SERVER_URL=http://localhost:8080
+      - AUTHENTICATION_API_KEY=your-secure-api-key-here
+
+      # Database (SQLite for simplicity, use PostgreSQL for production)
+      - DATABASE_PROVIDER=sqlite
+      - DATABASE_CONNECTION=./data/evolution.db
+
+      # Webhook Configuration
+      - WEBHOOK_GLOBAL_ENABLED=false
+      - WEBHOOK_GLOBAL_URL=
+      - WEBHOOK_EVENTS_ON=true
+
+      # QR Code Settings
+      - QR_CODE_LIMIT=30
+      - QR_CODE_COLOR=#000000
+
+      # Additional Settings
+      - LOG_LEVEL=info
+      - DEL_INSTANCE=false
+    volumes:
+      - evolution-data:/evolution/instances
+    networks:
+      - evolution-network
+
+networks:
+  evolution-network:
+    driver: bridge
+
+volumes:
+  evolution-data:

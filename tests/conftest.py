@@ -28,6 +28,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     # Import all models to register them with Base.metadata
     from app.models.tenant import Tenant
     from app.models.agent import AgentConfig
+    from app.models.whatsapp import WhatsAppSession, WhatsAppMessage
     from app.models.wiki import WikiSource, WikiPage, WikiLink, WikiLog
     from app.models.user import Session, RefreshToken
 

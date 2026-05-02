@@ -7,6 +7,8 @@ from app.core.database import engine, Base
 from app.api.auth import router as auth_router
 from app.api import wiki_router
 from app.api.agent import router as agent_router
+from app.api.whatsapp import router as whatsapp_router
+from app.api.webhook import router as webhook_router
 
 settings = get_settings()
 
@@ -43,6 +45,8 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(wiki_router)
 app.include_router(agent_router)
+app.include_router(whatsapp_router)
+app.include_router(webhook_router)
 
 
 @app.get("/health")

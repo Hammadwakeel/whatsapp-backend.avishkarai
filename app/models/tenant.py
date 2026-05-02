@@ -30,9 +30,12 @@ class Tenant(Base):
     wiki_links: Mapped[list["WikiLink"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
     wiki_logs: Mapped[list["WikiLog"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
     agent_config: Mapped["AgentConfig"] = relationship(back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    whatsapp_session: Mapped["WhatsAppSession"] = relationship(back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    whatsapp_messages: Mapped[list["WhatsAppMessage"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
 
 
 # Import related models
 from app.models.user import User, UserHistory, Session, RefreshToken
 from app.models.wiki import WikiSource, WikiPage, WikiLink, WikiLog
 from app.models.agent import AgentConfig
+from app.models.whatsapp import WhatsAppSession, WhatsAppMessage

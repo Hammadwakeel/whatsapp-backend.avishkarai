@@ -5,6 +5,7 @@
 - **Database**: PostgreSQL with SQLAlchemy (async)
 - **Auth**: JWT with access/refresh tokens (tenant-based)
 - **LLM**: OpenRouter (Claude) integration
+- **WhatsApp**: Evolution API (free, open-source)
 - **Migration**: Alembic
 - **Testing**: pytest + pytest-asyncio
 
@@ -18,19 +19,21 @@
 ```
 inika-backend/
 ├── app/
-│   ├── api/           # Route handlers (auth, wiki)
+│   ├── api/           # Route handlers (auth, wiki, whatsapp)
 │   ├── core/          # Config, security, database
 │   ├── models/        # SQLAlchemy models (tenant, wiki)
 │   ├── schemas/      # Pydantic schemas
-│   ├── services/     # Business logic (tenant, wiki, LLM)
+│   ├── services/     # Business logic (tenant, wiki, LLM, evolution)
 │   └── main.py       # FastAPI app entry
 ├── alembic/          # Database migrations
 ├── docs/             # Documentation
 │   ├── API.md        # Auth API reference
 │   ├── INTEGRATION.md # Frontend integration
-│   └── WIKI.md       # Wiki system docs
+│   ├── WIKI.md       # Wiki system docs
+│   └── WHATSAPP.md   # WhatsApp/Evolution API docs
 ├── wiki/             # Wiki markdown files
 ├── tests/            # Unit & integration tests
+├── docker-compose.evolution.yml  # Evolution API setup
 ├── skills.md         # Claude Code skills
 ├── .env.example
 ├── docker-compose.yml
@@ -41,6 +44,7 @@ inika-backend/
 - **Auth API**: `docs/API.md`
 - **Frontend Integration**: `docs/INTEGRATION.md`
 - **Wiki API**: `docs/WIKI.md`
+- **WhatsApp Integration**: `docs/WHATSAPP.md`
 - **Claude Skills**: `skills.md`
 - **Swagger UI**: `http://localhost:8000/docs`
 
@@ -54,6 +58,9 @@ inika-backend/
 | LLM_MODEL | No | Default: anthropic/claude-3-haiku |
 | ACCESS_TOKEN_EXPIRE_MINUTES | No | Token expiry (default: 30) |
 | REFRESH_TOKEN_EXPIRE_DAYS | No | Refresh expiry (default: 7) |
+| EVOLUTION_URL | No | Evolution API URL (default: http://localhost:8080) |
+| EVOLUTION_API_KEY | No | Evolution API authentication key |
+| EVOLUTION_INSTANCE_NAME | No | Instance name for WhatsApp (default: inika) |
 
 ## Core Features
 
@@ -75,6 +82,12 @@ inika-backend/
 - **Search**: Full-text search across pages
 - **Cross-references**: `[[Wiki Links]]` between pages
 
+### WhatsApp Integration (Evolution API)
+- Free, open-source WhatsApp gateway
+- QR code generation via API
+- Webhook support for incoming messages
+- Message history and session management
+
 ## Database Tables
 
 ### Auth Tables
@@ -87,6 +100,10 @@ inika-backend/
 - `wiki_pages` - Generated pages (per tenant)
 - `wiki_links` - Cross-references (per tenant)
 - `wiki_log` - Operation history (per tenant)
+
+### WhatsApp Tables
+- `whatsapp_sessions` - WhatsApp connection status per tenant
+- `whatsapp_messages` - Message history (inbound/outbound)
 
 ## Running
 ```bash
@@ -104,6 +121,9 @@ docker-compose up
 
 # Migrations
 alembic upgrade head
+
+# Start Evolution API (WhatsApp gateway)
+docker-compose -f docker-compose.evolution.yml up -d
 ```
 
 ## Key Dependencies
@@ -111,8 +131,9 @@ alembic upgrade head
 - sqlalchemy[asyncio], asyncpg - Async DB
 - python-jose - JWT tokens
 - passlib[bcrypt] - Password hashing
-- httpx - HTTP client (for OpenRouter/Tavily)
+- httpx - HTTP client (for OpenRouter/Tavily/Evolution)
 - pydantic, pydantic-settings - Validation
+- qrcode[pil] - QR code generation
 
 ## GitHub Repository
 - **Remote**: https://github.com/Hammadwakeel/whatsapp-backend.avishkarai.git

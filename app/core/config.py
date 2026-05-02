@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # Web Search (SHARED across all tenants)
     tavily_api_key: str = ""
 
+    # Evolution API - Free WhatsApp Gateway
+    evolution_url: str = "http://localhost:8080"
+    evolution_api_key: str = ""
+    evolution_instance_name: str = "inika"
+
     class Config:
         env_file = ".env"
         case_sensitive = False
