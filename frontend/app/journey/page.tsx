@@ -1,311 +1,368 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, MessageSquare, Clock, RefreshCw, Play, CheckCircle, XCircle, Loader2, Utensils, CalendarCheck, Gift } from "lucide-react";
-import { Skeleton, SkeletonCard } from "../../components/Skeleton";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-interface Guest {
-  guest_id: string;
-  gname: string;
-  room: string;
-  mobile: string;
-  gstatus: string;
-  cindate: string;
-  coutdate: string;
-  btype: string;
-  welcome_sent: number;
-  breakfast_sent: number;
-  lunch_sent: number;
-  dinner_sent: number;
-  checkout_sent: number;
-  amenity_sent: number;
-  total_sent: number;
-}
-
-interface JourneySummary {
-  tenant_id: string;
-  total_guests: number;
-  active_guests: number;
-  checked_out: number;
-  total_messages_sent: number;
-  guests: Guest[];
-}
+import { MapPin, MessageSquare, Sun, Coffee, UtensilsCrossed, Moon, Send, RefreshCw, Loader2, Check, X, Cloud, CloudRain, Thermometer } from "lucide-react";
+import { journeyAPI, JourneyConfig, BookingGuest } from "@/lib/api";
+import NavigationWrapper from "@/components/NavigationWrapper";
 
 export default function JourneyPage() {
-  const [tenantId, setTenantId] = useState<string>("");
-  const [token, setToken] = useState<string>("");
-  const [journeyData, setJourneyData] = useState<JourneySummary | null>(null);
+  return (
+    <NavigationWrapper>
+      <JourneyContent />
+    </NavigationWrapper>
+  );
+}
+
+function JourneyContent() {
+  const [config, setConfig] = useState<JourneyConfig | null>(null);
+  const [guests, setGuests] = useState<BookingGuest[]>([]);
+  const [logs, setLogs] = useState<Array<{ id: string; guest_name: string; message_type: string; content: string; sent_at: string }>>([]);
+  const [weather, setWeather] = useState<{ status: string; temperature: number; condition: string; city: string } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [broadcasting, setBroadcasting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedTenant = window.localStorage.getItem("axiom_tenant_id");
-    const storedToken = window.localStorage.getItem("axiom_token");
-    if (storedTenant) {
-      setTenantId(storedTenant);
-      setToken(storedToken || "");
-    }
+    loadData();
   }, []);
 
-  const fetchJourneySummary = async () => {
-    if (!tenantId || !token) return;
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/journey/summary?tenant_id=${encodeURIComponent(tenantId)}&token=${encodeURIComponent(token)}`
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setJourneyData(data);
-      } else {
-        const err = await response.json();
-        setError(err.detail || "Failed to fetch");
-      }
-    } catch (err) {
-      console.error("Failed to fetch journey status:", err);
-      setError("Network error");
-    }
-  };
-
-  const runJourneyAgent = async () => {
-    if (!tenantId || !token || running) return;
-    setRunning(true);
+  const loadData = async () => {
+    setLoading(true);
     setError(null);
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/journey/trigger?tenant_id=${encodeURIComponent(tenantId)}&token=${encodeURIComponent(token)}&dry_run=false`,
-        { method: "POST" }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        console.log("Journey agent result:", data);
-        await fetchJourneySummary();
-      } else {
-        const err = await response.json();
-        setError(err.detail || "Failed to run journey agent");
+      const [configData, guestsData, logsData] = await Promise.all([
+        journeyAPI.getConfig().catch(() => null),
+        journeyAPI.getGuests().catch(() => ({ guests: [], total: 0 })),
+        journeyAPI.getLogs(10).catch(() => ({ logs: [], total: 0 })),
+      ]);
+      setConfig(configData);
+      setGuests(guestsData.guests);
+      setLogs(logsData.logs);
+
+      // Get weather if config exists
+      if (configData?.hotel_city) {
+        try {
+          const weatherData = await journeyAPI.getWeather(configData.hotel_city);
+          setWeather(weatherData);
+        } catch {
+          // Weather is optional
+        }
       }
-    } catch (err) {
-      setError("Error running journey agent");
-      console.error(err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load";
+      setError(msg);
     } finally {
-      setRunning(false);
+      setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (!tenantId || !token) return;
-    setLoading(true);
-    fetchJourneySummary().then(() => setLoading(false));
-    const interval = setInterval(fetchJourneySummary, 30000);
-    return () => clearInterval(interval);
-  }, [tenantId, token]);
-
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return "-";
-    return dateStr;
-  };
-
-  const getStatusBadge = (status: string) => {
-    const colors: Record<string, string> = {
-      "Arrived": "bg-green-100 text-green-800 border-green-300",
-      "StayOver": "bg-blue-100 text-blue-800 border-blue-300",
-      "Due In": "bg-amber-100 text-amber-800 border-amber-300",
-      "Checked Out": "bg-gray-100 text-gray-600 border-gray-300",
-    };
-    return colors[status] || "bg-gray-100 text-gray-800 border-gray-300";
-  };
-
-  const getSentBadge = (sent: number) => {
-    if (sent > 0) {
-      return <CheckCircle className="h-4 w-4 text-green-600" />;
+  const toggleJourney = async () => {
+    if (!config) return;
+    try {
+      if (config.is_enabled) {
+        await journeyAPI.disable();
+      } else {
+        await journeyAPI.enable();
+      }
+      loadData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to toggle";
+      setError(msg);
     }
-    return <XCircle className="h-4 w-4 text-gray-300" />;
+  };
+
+  const broadcastMessage = async (type: string) => {
+    setBroadcasting(true);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const result = await journeyAPI.broadcast(type);
+      setSuccessMsg(`Sent ${result.messages_sent} ${type} messages to ${result.guests_count} guests`);
+      loadData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Broadcast failed";
+      setError(msg);
+    } finally {
+      setBroadcasting(false);
+      setTimeout(() => setSuccessMsg(null), 4000);
+    }
+  };
+
+  const getWeatherIcon = (condition: string) => {
+    const lower = condition?.toLowerCase() || "";
+    if (lower.includes("rain")) return <CloudRain className="h-5 w-5" />;
+    if (lower.includes("cloud")) return <Cloud className="h-5 w-5" />;
+    return <Sun className="h-5 w-5" />;
   };
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-white font-sans text-black selection:bg-black selection:text-white">
-      <main className="mx-auto max-w-7xl px-6 py-12">
+    <div className="min-h-screen overflow-x-hidden bg-white px-6 py-12">
+      <div className="mx-auto max-w-7xl">
+        {/* Header */}
         <header className="mb-10 border-y border-black bg-white px-6 py-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center border border-black bg-black text-white">
-                <Users className="h-5 w-5" />
+                <MapPin className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="text-3xl font-black tracking-tight">GUEST JOURNEY</h1>
-                <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-500">
-                  // Proactive guest messaging system
+                <h1 className="text-3xl font-black tracking-tight uppercase">Journey Engine</h1>
+                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+                  AI-powered guest messaging system
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-4">
               <button
-                onClick={runJourneyAgent}
-                disabled={running || !tenantId}
-                className="flex items-center gap-2 border border-black bg-black px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white transition hover:bg-zinc-800 disabled:opacity-50"
-              >
-                {running ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
-                RUN_JOURNEY_AGENT
-              </button>
-              <button
-                onClick={fetchJourneySummary}
+                onClick={loadData}
                 className="flex items-center gap-2 border border-black px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] transition hover:bg-black hover:text-white"
               >
                 <RefreshCw className="h-4 w-4" />
-                REFRESH
+                Refresh
               </button>
             </div>
           </div>
         </header>
 
+        {/* Error */}
         {error && (
           <div className="mb-6 border border-red-500 bg-red-50 px-4 py-3">
-            <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-red-700">ERROR: {error}</p>
+            <p className="font-mono text-xs text-red-600">ERROR: {error}</p>
           </div>
         )}
 
+        {/* Success */}
+        {successMsg && (
+          <div className="mb-6 border border-green-500 bg-green-50 px-4 py-3">
+            <p className="font-mono text-xs text-green-700">{successMsg}</p>
+          </div>
+        )}
+
+        {/* Config & Status */}
         {loading ? (
-          <JourneySkeleton />
+          <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-32 animate-pulse bg-zinc-100" />
+            ))}
+          </div>
         ) : (
           <>
-            <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-4">
-              <StatCard label="TOTAL_GUESTS" value={journeyData?.total_guests ?? 0} />
-              <StatCard label="ACTIVE_GUESTS" value={journeyData?.active_guests ?? 0} />
-              <StatCard label="CHECKED_OUT" value={journeyData?.checked_out ?? 0} />
-              <StatCard label="MESSAGES_SENT" value={journeyData?.total_messages_sent ?? 0} />
+            {/* Journey Status Card */}
+            <div className="mb-8 border border-black">
+              <div className="flex items-center justify-between border-b border-black bg-black px-6 py-4">
+                <span className="font-mono text-sm font-semibold uppercase text-white tracking-wider">
+                  Journey Configuration
+                </span>
+                <button
+                  onClick={toggleJourney}
+                  className={`flex items-center gap-2 border px-4 py-2 text-[10px] font-black uppercase tracking-wider transition ${
+                    config?.is_enabled
+                      ? "border-green-500 text-green-500 hover:bg-green-500 hover:text-white"
+                      : "border-zinc-400 text-zinc-400 hover:bg-zinc-400 hover:text-white"
+                  }`}
+                >
+                  {config?.is_enabled ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                  {config?.is_enabled ? "Enabled" : "Disabled"}
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-px bg-black md:grid-cols-4">
+                <div className="bg-white p-4">
+                  <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">City</p>
+                  <p className="mt-1 font-mono text-lg font-bold">{config?.hotel_city || "Not set"}</p>
+                </div>
+                <div className="bg-white p-4">
+                  <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Weather</p>
+                  {weather?.status === "ok" ? (
+                    <div className="mt-1 flex items-center gap-2">
+                      {getWeatherIcon(weather.condition)}
+                      <span className="font-mono text-lg font-bold">{weather.temperature}°C</span>
+                      <span className="font-mono text-xs text-zinc-500">{weather.condition}</span>
+                    </div>
+                  ) : (
+                    <p className="font-mono text-lg font-bold text-zinc-400">N/A</p>
+                  )}
+                </div>
+                <div className="bg-white p-4">
+                  <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Active Guests</p>
+                  <p className="mt-1 font-mono text-lg font-bold">{guests.length}</p>
+                </div>
+                <div className="bg-white p-4">
+                  <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Message Types</p>
+                  <p className="mt-1 font-mono text-xs">
+                    {config?.enable_meal_reminders ? "Meal " : ""}
+                    {config?.enable_weather_based ? "Weather " : ""}
+                    {config?.enable_status_messages ? "Status" : ""}
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
-              <JourneyMetric
-                label="WELCOME"
-                sent={journeyData?.guests?.reduce((acc, item) => acc + item.welcome_sent, 0) ?? 0}
-                icon={MessageSquare}
-              />
-              <JourneyMetric
-                label="MEAL_UPDATES"
-                sent={
-                  journeyData?.guests?.reduce(
-                    (acc, item) => acc + item.breakfast_sent + item.lunch_sent + item.dinner_sent,
-                    0
-                  ) ?? 0
-                }
-                icon={Utensils}
-              />
-              <JourneyMetric
-                label="CHECKOUT_AMENITY"
-                sent={
-                  journeyData?.guests?.reduce(
-                    (acc, item) => acc + item.checkout_sent + item.amenity_sent,
-                    0
-                  ) ?? 0
-                }
-                icon={CalendarCheck}
-              />
+            {/* Broadcast Actions */}
+            <div className="mb-8">
+              <h2 className="mb-4 text-xs font-black uppercase tracking-widest text-zinc-500">
+                Broadcast Messages
+              </h2>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+                <BroadcastButton
+                  icon={Sun}
+                  label="Morning"
+                  time="8:00 AM"
+                  color="black"
+                  onClick={() => broadcastMessage("morning")}
+                  disabled={broadcasting}
+                />
+                <BroadcastButton
+                  icon={Coffee}
+                  label="Breakfast"
+                  time="7:00 AM"
+                  color="amber"
+                  onClick={() => broadcastMessage("breakfast")}
+                  disabled={broadcasting}
+                />
+                <BroadcastButton
+                  icon={UtensilsCrossed}
+                  label="Lunch"
+                  time="11:00 AM"
+                  color="blue"
+                  onClick={() => broadcastMessage("lunch")}
+                  disabled={broadcasting}
+                />
+                <BroadcastButton
+                  icon={UtensilsCrossed}
+                  label="Dinner"
+                  time="6:00 PM"
+                  color="purple"
+                  onClick={() => broadcastMessage("dinner")}
+                  disabled={broadcasting}
+                />
+                <BroadcastButton
+                  icon={Moon}
+                  label="Evening"
+                  time="8:00 PM"
+                  color="zinc"
+                  onClick={() => broadcastMessage("evening")}
+                  disabled={broadcasting}
+                />
+              </div>
+            </div>
+
+            {/* Guest List & Logs */}
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+              {/* Active Guests */}
+              <div className="border border-black">
+                <div className="border-b border-black bg-black px-4 py-3">
+                  <h3 className="font-mono text-xs font-semibold uppercase text-white tracking-wider">
+                    Active Guests ({guests.length})
+                  </h3>
+                </div>
+                <div className="max-h-96 overflow-y-auto">
+                  {guests.length === 0 ? (
+                    <div className="p-6 text-center">
+                      <p className="font-mono text-sm text-zinc-500">No active guests</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-100">
+                      {guests.slice(0, 10).map((guest, i) => (
+                        <div key={i} className="flex items-center justify-between px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 items-center justify-center border border-black bg-gray-100 font-mono text-xs font-bold">
+                              {guest.gname?.charAt(0) || "?"}
+                            </div>
+                            <div>
+                              <p className="font-mono text-sm font-medium">{guest.gname}</p>
+                              <p className="font-mono text-[10px] text-zinc-500">Room {guest.room}</p>
+                            </div>
+                          </div>
+                          <span className={`badge ${guest.gstatus === "StayOver" || guest.gstatus === "Arrived" ? "badge-success" : "badge-info"}`}>
+                            {guest.gstatus}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Recent Logs */}
+              <div className="border border-black">
+                <div className="border-b border-black bg-black px-4 py-3">
+                  <h3 className="font-mono text-xs font-semibold uppercase text-white tracking-wider">
+                    Recent Messages
+                  </h3>
+                </div>
+                <div className="max-h-96 overflow-y-auto">
+                  {logs.length === 0 ? (
+                    <div className="p-6 text-center">
+                      <p className="font-mono text-sm text-zinc-500">No messages sent yet</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-100">
+                      {logs.map((log, i) => (
+                        <div key={i} className="px-4 py-3">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-mono text-xs font-bold uppercase">{log.message_type}</span>
+                            <span className="font-mono text-[10px] text-zinc-400">
+                              {new Date(log.sent_at).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <p className="font-mono text-sm text-zinc-700">{log.guest_name}</p>
+                          <p className="mt-1 font-mono text-xs text-zinc-500 truncate">{log.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </>
         )}
 
+        {/* Footer */}
         <footer className="mt-16 border-t border-black bg-black px-6 py-8">
           <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-500">
-            <span>GUEST_JOURNEY v1.0.0</span>
-            <span>AXIOM_PLATFORM</span>
+            <span>Journey Engine v1.0</span>
+            <span>Inika Bot</span>
           </div>
         </footer>
-      </main>
+      </div>
     </div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="border border-black bg-white p-4">
-      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">{label}</p>
-      <p className="mt-2 text-3xl font-black tracking-tight">{value}</p>
-    </div>
-  );
-}
-
-function JourneyMetric({
-  label,
-  sent,
+function BroadcastButton({
   icon: Icon,
+  label,
+  time,
+  color,
+  onClick,
+  disabled,
 }: {
-  label: string;
-  sent: number;
   icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  time: string;
+  color: string;
+  onClick: () => void;
+  disabled: boolean;
 }) {
+  const colorClasses: Record<string, string> = {
+    black: "bg-black text-white border-black hover:bg-zinc-800",
+    amber: "bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200",
+    blue: "bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-200",
+    purple: "bg-purple-100 text-purple-800 border-purple-300 hover:bg-purple-200",
+    zinc: "bg-zinc-100 text-zinc-700 border-zinc-300 hover:bg-zinc-200",
+  };
+
   return (
-    <div className="border border-black bg-white p-5">
-      <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4" />
-        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">{label}</p>
-      </div>
-      <p className="mt-3 text-2xl font-black tracking-tight">{sent}</p>
-    </div>
-  );
-}
-
-function JourneySkeleton() {
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        <SkeletonCard>
-          <Skeleton className="mb-2 h-4 w-20" />
-          <Skeleton className="h-8 w-12" />
-        </SkeletonCard>
-        <SkeletonCard>
-          <Skeleton className="mb-2 h-4 w-20" />
-          <Skeleton className="h-8 w-12" />
-        </SkeletonCard>
-        <SkeletonCard>
-          <Skeleton className="mb-2 h-4 w-20" />
-          <Skeleton className="h-8 w-12" />
-        </SkeletonCard>
-        <SkeletonCard>
-          <Skeleton className="mb-2 h-4 w-20" />
-          <Skeleton className="h-8 w-12" />
-        </SkeletonCard>
-      </div>
-
-      <SkeletonCard className="p-0 overflow-hidden">
-        <div className="border-b border-black bg-black px-6 py-4">
-          <Skeleton className="h-5 w-40" />
-        </div>
-        <div className="p-6">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="mb-4 flex items-center gap-4 border-b border-gray-100 pb-4 last:border-0 last:mb-0 last:pb-0">
-              <Skeleton className="h-10 w-40" />
-              <Skeleton className="h-6 w-16" />
-              <Skeleton className="h-6 w-20" />
-              <Skeleton className="h-6 w-24" />
-              <Skeleton className="h-6 w-24" />
-              <Skeleton className="h-6 w-8" />
-              <Skeleton className="h-6 w-8" />
-              <Skeleton className="h-6 w-8" />
-              <Skeleton className="h-6 w-8" />
-              <Skeleton className="h-6 w-8" />
-            </div>
-          ))}
-        </div>
-      </SkeletonCard>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <SkeletonCard key={i}>
-            <div className="mb-3 flex items-center gap-2">
-              <Skeleton className="h-4 w-4" />
-              <Skeleton className="h-4 w-24" />
-            </div>
-            <Skeleton className="h-3 w-20" />
-          </SkeletonCard>
-        ))}
-      </div>
-    </div>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex flex-col items-center gap-2 border p-4 transition ${colorClasses[color]} disabled:opacity-50`}
+    >
+      <Icon className="h-5 w-5" />
+      <span className="font-mono text-xs font-bold uppercase tracking-wider">{label}</span>
+      <span className="font-mono text-[10px] opacity-70">{time}</span>
+    </button>
   );
 }
