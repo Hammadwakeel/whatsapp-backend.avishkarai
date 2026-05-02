@@ -29,7 +29,7 @@ services:
     environment:
       # Server Configuration
       - SERVER_URL=http://localhost:8080
-      - AUTHENTICATION_API_KEY=4c2cf19117688020b1fba930f2332e99cfb1c17528a297104783563a19c3c231
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
 
       # Database (PostgreSQL - SQLite is not supported)
       - DATABASE_PROVIDER=postgresql
@@ -79,7 +79,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/inika_db
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
       - EVOLUTION_URL=http://evolution-api:8080
-      - EVOLUTION_API_KEY=4c2cf19117688020b1fba930f2332e99cfb1c17528a297104783563a19c3c231
+      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
     depends_on:
       db:
         condition: service_healthy
