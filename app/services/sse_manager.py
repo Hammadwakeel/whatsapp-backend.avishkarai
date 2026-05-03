@@ -72,7 +72,7 @@ class SSEManager:
 sse_manager = SSEManager()
 
 
-async def sse_events(tenant_id: str):
+async def sse_events(tenant_id: str, token: str | None = None):
     """Generator for SSE events - yields Server-Sent Events"""
     queue = await sse_manager.connect(tenant_id)
 
@@ -89,10 +89,14 @@ async def sse_events(tenant_id: str):
         await sse_manager.disconnect(tenant_id, queue)
 
 
-def create_sse_response(tenant_id: str) -> StreamingResponse:
-    """Create an SSE streaming response for a tenant"""
+def create_sse_response(tenant_id: str, token: str | None = None) -> StreamingResponse:
+    """Create an SSE streaming response for a tenant.
+
+    Note: For production, implement proper SSE authentication.
+    Token can be passed as query param for non-browser clients.
+    """
     return StreamingResponse(
-        sse_events(tenant_id),
+        sse_events(tenant_id, token),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

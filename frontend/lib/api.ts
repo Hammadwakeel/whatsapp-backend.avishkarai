@@ -589,10 +589,9 @@ export const whatsappAPI = {
   connectSSE(onMessage?: (type: string, data: Record<string, unknown>) => void): EventSource {
     const base = getApiBaseUrl();
     const token = getStoredToken();
-    const eventSource = new EventSource(`${base}/whatsapp/events`, {
-      // @ts-expect-error -EventSource doesn't accept headers but we need auth
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    // Pass token as query param since EventSource doesn't support custom headers
+    const url = `${base}/whatsapp/events${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    const eventSource = new EventSource(url);
 
     if (onMessage) {
       eventSource.onmessage = (event) => {

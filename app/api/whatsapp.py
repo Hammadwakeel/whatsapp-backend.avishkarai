@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -19,6 +20,8 @@ from app.services.whatsapp_service import WhatsAppService
 from app.services.evolution_client import EvolutionClient
 from app.services.sse_manager import sse_manager, create_sse_response
 from app.api.deps import get_current_tenant
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 settings = get_settings()
@@ -224,7 +227,10 @@ async def disconnect_whatsapp(
 
 
 @router.get("/events")
-async def whatsapp_sse_events(current_tenant: Tenant = Depends(get_current_tenant)):
+async def whatsapp_sse_events(
+    request: Request,
+    current_tenant: Tenant = Depends(get_current_tenant),
+):
     """
     Server-Sent Events (SSE) endpoint for real-time WhatsApp updates.
     Replace polling with SSE for instant updates on:
