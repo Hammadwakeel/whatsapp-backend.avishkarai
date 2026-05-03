@@ -50,11 +50,13 @@ async def get_whatsapp_status(
     # Get real-time status from Evolution API
     evolution_status = await evolution_client.get_connection_status()
 
-    # Update local session if connected
+    # Update local session if connected - but only update connected_at once (don't spam DB on every poll)
     if evolution_status.get("connected"):
         session = await whatsapp_service.get_or_create_session(current_tenant.id)
         session.status = SessionStatus.CONNECTED.value
-        session.connected_at = datetime.now(timezone.utc)
+        # Only update connected_at if not already set (prevents constant DB writes)
+        if not session.connected_at:
+            session.connected_at = datetime.now(timezone.utc)
         await db.commit()
 
     # Get local session for QR code
