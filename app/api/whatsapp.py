@@ -1,10 +1,8 @@
 """WhatsApp API Routes - Evolution API Integration"""
 
+import asyncio
 import base64
 from datetime import datetime, timezone
-from io import BytesIO
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +17,7 @@ from app.schemas.whatsapp import (
 )
 from app.services.whatsapp_service import WhatsAppService
 from app.services.evolution_client import EvolutionClient
+from app.services.sse_manager import sse_manager, create_sse_response
 from app.api.deps import get_current_tenant
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
@@ -43,12 +42,18 @@ async def get_whatsapp_status(
     """
     Get WhatsApp connection status from Evolution API.
     Uses tenant-specific instance for session isolation.
+    Broadcasts state changes via SSE.
     """
     whatsapp_service = WhatsAppService(db)
     evolution_client = get_tenant_evolution_client(whatsapp_service, current_tenant.id)
 
     # Get real-time status from Evolution API
     evolution_status = await evolution_client.get_connection_status()
+
+    # Get current session state for comparison
+    session = await whatsapp_service.get_session(current_tenant.id)
+    old_status = session.status if session else None
+    new_status = evolution_status.get("status", SessionStatus.DISCONNECTED.value)
 
     # Update local session if connected - but only update connected_at once (don't spam DB on every poll)
     if evolution_status.get("connected"):
@@ -58,6 +63,20 @@ async def get_whatsapp_status(
         if not session.connected_at:
             session.connected_at = datetime.now(timezone.utc)
         await db.commit()
+
+    # Detect state changes and broadcast via SSE
+    if old_status != new_status and old_status is not None:
+        logger.info(f"WhatsApp state change for tenant={current_tenant.id}: {old_status} -> {new_status}")
+        await sse_manager.broadcast_connection_state(current_tenant.id, new_status)
+
+        # If disconnected unexpectedly, trigger auto-reset flow
+        if new_status in ("DISCONNECTED", "CLOSE", "CLOSED", "ERROR") and old_status == "CONNECTED":
+            logger.warning(f"Unexpected WhatsApp disconnect for tenant={current_tenant.id}")
+            await sse_manager.broadcast(current_tenant.id, "session_disconnected", {
+                "message": "WhatsApp session was disconnected. Please scan QR code to reconnect.",
+                "old_state": old_status,
+                "action": "reconnect_required"
+            })
 
     # Get local session for QR code
     session = await whatsapp_service.get_session(current_tenant.id)
@@ -198,7 +217,82 @@ async def disconnect_whatsapp(
         status=SessionStatus.DISCONNECTED.value
     )
 
+    # Broadcast disconnect event via SSE
+    await sse_manager.broadcast_connection_state(current_tenant.id, "DISCONNECTED")
+
     return {"message": "WhatsApp disconnected successfully"}
+
+
+@router.get("/events")
+async def whatsapp_sse_events(current_tenant: Tenant = Depends(get_current_tenant)):
+    """
+    Server-Sent Events (SSE) endpoint for real-time WhatsApp updates.
+    Replace polling with SSE for instant updates on:
+    - Connection status changes
+    - New incoming/outgoing messages
+    - QR code generation
+    """
+    return create_sse_response(current_tenant.id)
+
+
+@router.get("/reset-session")
+async def reset_whatsapp_session(
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Reset the WhatsApp session and start fresh.
+    This will:
+    1. Logout from Evolution API
+    2. Clear local session data
+    3. Broadcast disconnect event
+    4. Generate new QR code
+    """
+    whatsapp_service = WhatsAppService(db)
+    evolution_client = get_tenant_evolution_client(whatsapp_service, current_tenant.id)
+
+    # Logout from Evolution
+    await evolution_client.logout()
+
+    # Update local status to disconnected
+    session = await whatsapp_service.update_status(
+        current_tenant.id,
+        status=SessionStatus.DISCONNECTED.value
+    )
+
+    # Clear QR code and related data
+    session.qr_code = None
+    session.qr_expires_at = None
+    session.phone_number = None
+    session.display_name = None
+    session.connected_at = None
+    session.error_message = "Session reset by user"
+    await db.commit()
+
+    # Broadcast reset event
+    await sse_manager.broadcast_connection_state(current_tenant.id, "RESET")
+
+    # Generate new QR code
+    qr_result = await evolution_client.generate_qr_code()
+
+    if qr_result.get("success") and qr_result.get("qr_code"):
+        await whatsapp_service.set_qr_code(
+            current_tenant.id,
+            qr_code=qr_result["qr_code"],
+            expires_at=datetime.now(timezone.utc).replace(second=0)
+        )
+        return {
+            "status": "qr_available",
+            "qr_code": qr_result["qr_code"],
+            "message": "Session reset. Scan new QR code with WhatsApp",
+        }
+
+    detail = qr_result.get("details") or evolution_client.evolution_user_hint()
+    return {
+        "status": "waiting",
+        "message": "Session reset. Generating QR code...",
+        "evolution_detail": detail,
+    }
 
 
 @router.get("/session", response_model=WhatsAppSessionResponse)

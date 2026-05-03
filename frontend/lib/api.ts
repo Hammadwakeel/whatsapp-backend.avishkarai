@@ -268,8 +268,9 @@ export type WikiSource = {
   id: string;
   title: string;
   source_type: string;
+  summary?: string;
   tags: string[];
-  status: string;
+  is_processed: boolean;
   created_at: string;
 };
 
@@ -279,14 +280,15 @@ export type WikiPage = {
   slug: string;
   content: string;
   page_type: string;
+  summary?: string;
   tags: string[];
-  links: string[];
+  is_draft: boolean;
   created_at: string;
   updated_at: string;
 };
 
 export const wikiAPI = {
-  async getIndex(): Promise<{ total_sources: number; total_pages: number; total_vectors: number }> {
+  async getIndex(): Promise<{ total_pages: number; total_sources: number; categories: Record<string, number> }> {
     const base = getApiBaseUrl();
     const response = await fetch(`${base}/wiki/index`, {
       headers: jsonAuthHeaders(),
@@ -322,12 +324,24 @@ export const wikiAPI = {
     return response.json();
   },
 
-  async ingest(title: string, content: string, sourceType: string, tags: string[]): Promise<WikiSource> {
+  async ingest(title: string, content: string, sourceType: string, tags: string[]): Promise<{
+    source: WikiSource;
+    created_pages: WikiPage[];
+    updated_pages: WikiPage[];
+  }> {
     const base = getApiBaseUrl();
     const response = await fetch(`${base}/wiki/ingest`, {
       method: "POST",
       headers: jsonAuthHeaders(),
-      body: JSON.stringify({ title, content, source_type: sourceType, tags, generate_summary: true, create_entity_pages: true }),
+      body: JSON.stringify({
+        title,
+        content,
+        source_type: sourceType,
+        tags,
+        generate_summary: true,
+        create_entity_pages: true,
+        update_related_pages: true,
+      }),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: "Ingest failed" }));
@@ -336,7 +350,7 @@ export const wikiAPI = {
     return response.json();
   },
 
-  async query(question: string, context?: string): Promise<{ answer: string; citations: string[] }> {
+  async query(question: string, context?: string): Promise<{ answer: string; citations: { page_title: string; excerpt: string }[] }> {
     const base = getApiBaseUrl();
     const response = await fetch(`${base}/wiki/query`, {
       method: "POST",
@@ -431,11 +445,25 @@ export const agentAPI = {
 
 export type WhatsAppSession = {
   id: string;
-  name: string;
+  tenant_id?: string;
   status: string;
-  phone?: string;
-  profile_name?: string;
-  qrcode?: string;
+  phone_number?: string | null;
+  display_name?: string | null;
+  qr_code?: string | null;
+  connected_at?: string | null;
+};
+
+export type WhatsAppMessageRecord = {
+  id: string;
+  tenant_id?: string;
+  direction: string;
+  from_number: string;
+  to_number: string | null;
+  content: string;
+  created_at: string;
+  agent_response?: string | null;
+  wiki_sources?: { sources?: string[] } | Record<string, unknown> | null;
+  web_search_used: boolean;
 };
 
 export const whatsappAPI = {
@@ -449,7 +477,33 @@ export const whatsappAPI = {
     return response.json();
   },
 
-  async connect(): Promise<WhatsAppSession> {
+  async getStatus(): Promise<{
+    status: string;
+    qrcode?: string;
+    is_connected?: boolean;
+    connected?: boolean;
+    local_session_id?: string | null;
+    pairing_code?: string | null;
+    evolution_detail?: string | null;
+  }> {
+    const base = getApiBaseUrl();
+    const response = await fetch(`${base}/whatsapp/status`, {
+      headers: jsonAuthHeaders(),
+    });
+    if (!response.ok) throw new Error("Failed to get status");
+    return response.json();
+  },
+
+  async connect(): Promise<{
+    status: string;
+    qr_code?: string;
+    connected?: boolean;
+    local_session_id?: string;
+    message?: string;
+    evolution_url?: string;
+    instance_name?: string;
+    evolution_detail?: string | null;
+  }> {
     const base = getApiBaseUrl();
     const response = await fetch(`${base}/whatsapp/connect`, {
       method: "POST",
@@ -468,6 +522,21 @@ export const whatsappAPI = {
     if (!response.ok) throw new Error("Failed to disconnect");
   },
 
+  async resetSession(): Promise<{
+    status: string;
+    qr_code?: string;
+    message?: string;
+    evolution_detail?: string | null;
+  }> {
+    const base = getApiBaseUrl();
+    const response = await fetch(`${base}/whatsapp/reset-session`, {
+      method: "GET",
+      headers: jsonAuthHeaders(),
+    });
+    if (!response.ok) throw new Error("Failed to reset session");
+    return response.json();
+  },
+
   async getQRCode(): Promise<{ qrcode: string } | null> {
     const base = getApiBaseUrl();
     const response = await fetch(`${base}/whatsapp/qrcode`, {
@@ -478,7 +547,7 @@ export const whatsappAPI = {
     return response.json();
   },
 
-  async sendMessage(to: string, message: string): Promise<{ messageId: string; status: string }> {
+  async sendMessage(to: string, message: string): Promise<{ message_id?: string | null; status: string }> {
     const base = getApiBaseUrl();
     const response = await fetch(`${base}/whatsapp/send`, {
       method: "POST",
@@ -492,13 +561,51 @@ export const whatsappAPI = {
     return response.json();
   },
 
-  async getMessages(limit: number = 50): Promise<{ messages: Array<{ id: string; from: string; to: string; content: string; timestamp: string; direction: string }>; total: number }> {
+  async getMessages(
+    pageSize: number = 100,
+    order: "asc" | "desc" = "desc",
+    page: number = 1,
+  ): Promise<{ messages: WhatsAppMessageRecord[]; total: number; page: number; page_size: number }> {
     const base = getApiBaseUrl();
-    const response = await fetch(`${base}/whatsapp/messages?limit=${limit}`, {
-      headers: jsonAuthHeaders(),
-    });
+    const response = await fetch(
+      `${base}/whatsapp/messages?page=${page}&page_size=${pageSize}&order=${order}`,
+      {
+        headers: jsonAuthHeaders(),
+      },
+    );
     if (!response.ok) throw new Error("Failed to get messages");
     return response.json();
+  },
+
+  /**
+   * Connect to Server-Sent Events for real-time WhatsApp updates.
+   * Returns an EventSource that emits:
+   * - `connected`: Initial connection event
+   * - `whatsapp_status`: Connection status changes
+   * - `new_message`: New inbound/outbound messages
+   * - `connection_state`: CONNECTED/DISCONNECTED state changes
+   * - `session_disconnected`: When session unexpectedly disconnects
+   */
+  connectSSE(onMessage?: (type: string, data: Record<string, unknown>) => void): EventSource {
+    const base = getApiBaseUrl();
+    const token = getStoredToken();
+    const eventSource = new EventSource(`${base}/whatsapp/events`, {
+      // @ts-expect-error -EventSource doesn't accept headers but we need auth
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (onMessage) {
+      eventSource.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          onMessage(parsed.type || "message", parsed.data || {});
+        } catch {
+          onMessage("message", { raw: event.data });
+        }
+      };
+    }
+
+    return eventSource;
   },
 };
 
@@ -583,7 +690,9 @@ export type JourneyConfig = {
   id: string;
   tenant_id: string;
   is_enabled: boolean;
-  hotel_city: string;
+  hotel_city: string | null;
+  hotel_latitude?: string | null;
+  hotel_longitude?: string | null;
   morning_message_hour: number;
   breakfast_hour: number;
   lunch_hour: number;
@@ -592,6 +701,8 @@ export type JourneyConfig = {
   enable_weather_based: boolean;
   enable_meal_reminders: boolean;
   enable_status_messages: boolean;
+  enable_conversation?: boolean;
+  max_messages_per_day?: number;
   include_due_in: boolean;
   include_arrived: boolean;
   include_stayover: boolean;
@@ -688,6 +799,19 @@ export const journeyAPI = {
       headers: jsonAuthHeaders(),
     });
     if (!response.ok) throw new Error("Failed to broadcast");
+    return response.json();
+  },
+
+  async getSchedulerStatus(): Promise<{
+    scheduler_running: boolean;
+    tenant_scheduled: boolean;
+    jobs: Array<{ job_id: string; next_run: string | null; active: boolean }>;
+  }> {
+    const base = getApiBaseUrl();
+    const response = await fetch(`${base}/journey/scheduler/status`, {
+      headers: jsonAuthHeaders(),
+    });
+    if (!response.ok) throw new Error("Failed to get scheduler status");
     return response.json();
   },
 };

@@ -31,6 +31,7 @@ class EvolutionClient:
         self._client: Optional[httpx.AsyncClient] = None
         self._qr_diag: dict[str, Any] = {}
         self._last_pairing_code: Optional[str] = None
+        self._last_known_state: Optional[str] = None  # Track state changes
 
     def evolution_user_hint(self) -> Optional[str]:
         """Short message for API/UI when QR cannot be loaded."""
@@ -333,6 +334,12 @@ class EvolutionClient:
             if response.status_code == 200:
                 data = response.json()
                 state = self._extract_instance_state(data)
+
+                # Detect state changes
+                state_changed = self._last_known_state is not None and self._last_known_state != state
+                old_state = self._last_known_state
+                self._last_known_state = state
+
                 qr_raw = (
                     data.get("qrCode")
                     or data.get("qrcode")
@@ -348,11 +355,18 @@ class EvolutionClient:
                     "status": state,
                     "qr_code": qr_raw,
                     "message": self._get_status_message(state),
+                    "state_changed": state_changed,
+                    "old_state": old_state,
                 }
             return {"connected": False, "status": "ERROR", "message": "Failed to get status"}
         except Exception as e:
             logger.error(f"Failed to get connection status: {e}")
             return {"connected": False, "status": "ERROR", "message": str(e)}
+
+    def reset_state_tracking(self):
+        """Reset state tracking after session reset/reconnect"""
+        self._last_known_state = None
+        self._qr_diag = {}
 
     def _get_status_message(self, state: str) -> str:
         """Get human-readable status message"""

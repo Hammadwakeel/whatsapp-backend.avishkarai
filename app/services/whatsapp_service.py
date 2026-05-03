@@ -3,7 +3,7 @@
 import hashlib
 from datetime import datetime, timezone
 from uuid import uuid4
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,9 @@ from app.schemas.whatsapp import (
     WhatsAppStatusResponse, QRCodeResponse,
     WhatsAppMessageCreate, WhatsAppMessageResponse,
 )
+
+if TYPE_CHECKING:
+    from app.services.sse_manager import SSEManager
 
 
 class WhatsAppService:
@@ -155,7 +158,9 @@ class WhatsAppService:
     async def record_message(
         self,
         tenant_id: str,
-        message_data: WhatsAppMessageCreate
+        message_data: WhatsAppMessageCreate,
+        broadcast: bool = True,
+        sse_manager: Optional["SSEManager"] = None,
     ) -> WhatsAppMessage:
         """Record a message in the database"""
         session = await self.get_session(tenant_id)
@@ -185,6 +190,13 @@ class WhatsAppService:
             await self.db.commit()
 
         await self.db.refresh(message)
+
+        # Broadcast new message via SSE if enabled
+        if broadcast and sse_manager:
+            from app.services.sse_manager import sse_manager as global_sse_manager
+            msg_dict = WhatsAppMessageResponse.model_validate(message).model_dump(mode="json")
+            await global_sse_manager.broadcast_new_message(tenant_id, msg_dict)
+
         return message
 
     async def get_messages(
