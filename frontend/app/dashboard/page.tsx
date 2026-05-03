@@ -14,7 +14,6 @@ import { useEffect, useState } from "react";
 import DashboardRecentActivity from "@/components/DashboardRecentActivity";
 import DashboardOpsStatus from "@/components/DashboardOpsStatus";
 import AppNav from "@/components/AppNav";
-import NavigationWrapper from "@/components/NavigationWrapper";
 import { getStoredTenant, getStoredToken, clearStoredAuth } from "@/lib/api";
 import { useRouter } from "next/navigation";
 
@@ -64,7 +63,11 @@ export default function DashboardPage() {
     }
 
     const storedTenant = getStoredTenant();
-    setTenant(storedTenant);
+    if (storedTenant) {
+      setTenant({ name: storedTenant.name, hotel_name: storedTenant.hotel_name ?? undefined });
+    } else {
+      setTenant(null);
+    }
     setLoading(false);
   }, [router]);
 
@@ -82,10 +85,9 @@ export default function DashboardPage() {
   }
 
   return (
-    <NavigationWrapper>
-      <div className="min-h-screen overflow-x-hidden bg-white font-sans text-black selection:bg-black selection:text-white">
-        {/* Module Cards Section */}
-        <section className="border-y border-black px-6 py-12">
+    <div className="min-h-screen overflow-x-hidden bg-white font-sans text-black selection:bg-black selection:text-white">
+      {/* Module Cards Section */}
+      <section className="border-y border-black px-6 py-12">
           <div className="mx-auto max-w-7xl">
             <div className="mb-6 flex items-center gap-4">
               <h2 className="whitespace-nowrap text-[11px] font-black uppercase tracking-[0.35em]">
@@ -144,7 +146,6 @@ export default function DashboardPage() {
           </div>
         </footer>
       </div>
-    </NavigationWrapper>
   );
 }
 

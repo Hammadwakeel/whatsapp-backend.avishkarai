@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MapPin, MessageSquare, Sun, Coffee, UtensilsCrossed, Moon, Send, RefreshCw, Loader2, Check, X, Cloud, CloudRain, Thermometer } from "lucide-react";
+import { MapPin, MessageSquare, Sun, Coffee, UtensilsCrossed, Moon, Send, RefreshCw, Loader2, Check, X, Cloud, CloudRain, Thermometer, Clock, Zap } from "lucide-react";
 import { journeyAPI, JourneyConfig, BookingGuest } from "@/lib/api";
-import NavigationWrapper from "@/components/NavigationWrapper";
+
 
 export default function JourneyPage() {
   return (
-    <NavigationWrapper>
+    <div className="min-h-screen overflow-x-hidden bg-white">
       <JourneyContent />
-    </NavigationWrapper>
+    </div>
   );
 }
 
@@ -18,11 +18,21 @@ function JourneyContent() {
   const [guests, setGuests] = useState<BookingGuest[]>([]);
   const [logs, setLogs] = useState<Array<{ id: string; guest_name: string; message_type: string; content: string; sent_at: string }>>([]);
   const [weather, setWeather] = useState<{ status: string; temperature: number; condition: string; city: string } | null>(null);
+  const [schedulerStatus, setSchedulerStatus] = useState<{
+    scheduler_running: boolean;
+    tenant_scheduled: boolean;
+    jobs: Array<{ job_id: string; next_run: string | null; active: boolean }>;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [locationMode, setLocationMode] = useState<"city" | "coords">("city");
+  const [cityDraft, setCityDraft] = useState("");
+  const [latDraft, setLatDraft] = useState("");
+  const [lonDraft, setLonDraft] = useState("");
+  const [savingLocation, setSavingLocation] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -32,23 +42,51 @@ function JourneyContent() {
     setLoading(true);
     setError(null);
     try {
-      const [configData, guestsData, logsData] = await Promise.all([
+      const [configData, guestsData, logsData, schedulerData] = await Promise.all([
         journeyAPI.getConfig().catch(() => null),
         journeyAPI.getGuests().catch(() => ({ guests: [], total: 0 })),
         journeyAPI.getLogs(10).catch(() => ({ logs: [], total: 0 })),
+        journeyAPI.getSchedulerStatus().catch(() => null),
       ]);
       setConfig(configData);
       setGuests(guestsData.guests);
       setLogs(logsData.logs);
+      setSchedulerStatus(schedulerData);
 
-      // Get weather if config exists
-      if (configData?.hotel_city) {
+      if (configData) {
+        const latS = configData.hotel_latitude?.toString().trim() ?? "";
+        const lonS = configData.hotel_longitude?.toString().trim() ?? "";
+        const latN = latS ? parseFloat(latS) : NaN;
+        const lonN = lonS ? parseFloat(lonS) : NaN;
+        const hasValidCoords =
+          !Number.isNaN(latN) && !Number.isNaN(lonN) && latS !== "" && lonS !== "";
+        if (hasValidCoords) {
+          setLocationMode("coords");
+          setLatDraft(latS);
+          setLonDraft(lonS);
+          setCityDraft(configData.hotel_city ?? "");
+        } else {
+          setLocationMode("city");
+          setCityDraft(configData.hotel_city ?? "");
+          setLatDraft(latS);
+          setLonDraft(lonS);
+        }
+
         try {
-          const weatherData = await journeyAPI.getWeather(configData.hotel_city);
+          let weatherData;
+          if (hasValidCoords) {
+            weatherData = await journeyAPI.getWeather(undefined, latN, lonN);
+          } else if (configData.hotel_city?.trim()) {
+            weatherData = await journeyAPI.getWeather(configData.hotel_city.trim());
+          } else {
+            weatherData = await journeyAPI.getWeather();
+          }
           setWeather(weatherData);
         } catch {
-          // Weather is optional
+          setWeather(null);
         }
+      } else {
+        setWeather(null);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load";
@@ -70,6 +108,39 @@ function JourneyContent() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to toggle";
       setError(msg);
+    }
+  };
+
+  const saveWeatherLocation = async () => {
+    if (!config) return;
+    setSavingLocation(true);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const { id: _id, tenant_id: _tid, ...cfg } = config;
+      if (locationMode === "city") {
+        await journeyAPI.updateConfig({
+          ...cfg,
+          hotel_city: cityDraft.trim() || "",
+          hotel_latitude: "",
+          hotel_longitude: "",
+        });
+      } else {
+        await journeyAPI.updateConfig({
+          ...cfg,
+          hotel_city: "",
+          hotel_latitude: latDraft.trim() || "",
+          hotel_longitude: lonDraft.trim() || "",
+        });
+      }
+      await loadData();
+      setSuccessMsg("Weather location saved");
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save location";
+      setError(msg);
+    } finally {
+      setSavingLocation(false);
     }
   };
 
@@ -169,8 +240,13 @@ function JourneyContent() {
               </div>
               <div className="grid grid-cols-1 gap-px bg-black md:grid-cols-4">
                 <div className="bg-white p-4">
-                  <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">City</p>
-                  <p className="mt-1 font-mono text-lg font-bold">{config?.hotel_city || "Not set"}</p>
+                  <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Location</p>
+                  <p className="mt-1 font-mono text-lg font-bold">
+                    {config?.hotel_latitude?.toString().trim() &&
+                    config?.hotel_longitude?.toString().trim()
+                      ? `${config.hotel_latitude}, ${config.hotel_longitude}`
+                      : config?.hotel_city || "Not set"}
+                  </p>
                 </div>
                 <div className="bg-white p-4">
                   <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Weather</p>
@@ -181,7 +257,9 @@ function JourneyContent() {
                       <span className="font-mono text-xs text-zinc-500">{weather.condition}</span>
                     </div>
                   ) : (
-                    <p className="font-mono text-lg font-bold text-zinc-400">N/A</p>
+                    <p className="font-mono text-lg font-bold text-zinc-400">
+                      {weather?.status === "no_location" ? "Set location below" : "N/A"}
+                    </p>
                   )}
                 </div>
                 <div className="bg-white p-4">
@@ -197,6 +275,164 @@ function JourneyContent() {
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* Weather location (OpenWeather) */}
+            <div className="mb-8 border border-black">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-black bg-zinc-100 px-6 py-4">
+                <div className="flex items-center gap-2">
+                  <Thermometer className="h-4 w-4 text-zinc-700" />
+                  <span className="font-mono text-sm font-semibold uppercase tracking-wider">
+                    Weather API location
+                  </span>
+                </div>
+                <p className="font-mono text-[10px] text-zinc-500">
+                  Saved per hotel · used for forecasts and journey messages
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-6 p-6 md:grid-cols-2">
+                <div>
+                  <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                    Location type
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLocationMode("city")}
+                      className={`border px-4 py-2 font-mono text-[10px] font-black uppercase tracking-wider ${
+                        locationMode === "city"
+                          ? "border-black bg-black text-white"
+                          : "border-zinc-300 bg-white text-zinc-600 hover:border-black"
+                      }`}
+                    >
+                      City name
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLocationMode("coords")}
+                      className={`border px-4 py-2 font-mono text-[10px] font-black uppercase tracking-wider ${
+                        locationMode === "coords"
+                          ? "border-black bg-black text-white"
+                          : "border-zinc-300 bg-white text-zinc-600 hover:border-black"
+                      }`}
+                    >
+                      Lat / Lon
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-end justify-end">
+                  <button
+                    type="button"
+                    onClick={saveWeatherLocation}
+                    disabled={savingLocation}
+                    className="border border-black bg-black px-6 py-2 font-mono text-[10px] font-black uppercase tracking-wider text-white transition hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    {savingLocation ? "Saving…" : "Save location"}
+                  </button>
+                </div>
+              </div>
+              <div className="border-t border-zinc-200 px-6 pb-6">
+                {locationMode === "city" ? (
+                  <label className="block">
+                    <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                      City (OpenWeather query)
+                    </span>
+                    <input
+                      type="text"
+                      value={cityDraft}
+                      onChange={(e) => setCityDraft(e.target.value)}
+                      placeholder="e.g. Dubai, AE"
+                      className="mt-2 w-full border border-black px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-black"
+                    />
+                  </label>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                        Latitude
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={latDraft}
+                        onChange={(e) => setLatDraft(e.target.value)}
+                        placeholder="e.g. 25.2048"
+                        className="mt-2 w-full border border-black px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-black"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                        Longitude
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={lonDraft}
+                        onChange={(e) => setLonDraft(e.target.value)}
+                        placeholder="e.g. 55.2708"
+                        className="mt-2 w-full border border-black px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-black"
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Auto Scheduler Status */}
+            <div className="mb-8 border border-black">
+              <div className="flex items-center justify-between border-b border-black bg-zinc-900 px-6 py-4">
+                <div className="flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-amber-500" />
+                  <span className="font-mono text-sm font-semibold uppercase text-white tracking-wider">
+                    Auto Scheduler
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${schedulerStatus?.tenant_scheduled ? "bg-green-500" : "bg-zinc-500"}`}></span>
+                  <span className="font-mono text-xs uppercase text-zinc-400">
+                    {schedulerStatus?.tenant_scheduled ? "Active" : "Inactive"}
+                  </span>
+                </div>
+              </div>
+              {schedulerStatus?.jobs && schedulerStatus.jobs.length > 0 ? (
+                <div className="max-h-48 overflow-y-auto">
+                  <div className="grid grid-cols-1 gap-px bg-black">
+                    {schedulerStatus.jobs.map((job) => (
+                      <div key={job.job_id} className="bg-white p-3 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Clock className="h-4 w-4 text-zinc-400" />
+                          <span className="font-mono text-xs uppercase">
+                            {job.job_id.split("_").slice(-2).join("_")}
+                          </span>
+                          {job.active && (
+                            <span className="flex items-center gap-1 border border-amber-500 bg-amber-50 px-2 py-0.5">
+                              <Loader2 className="h-3 w-3 animate-spin text-amber-500" />
+                              <span className="font-mono text-[10px] text-amber-700">Running</span>
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-mono text-xs text-zinc-500">
+                          {job.next_run ? (
+                            <>
+                              Next: {new Date(job.next_run).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </>
+                          ) : (
+                            <span className="text-zinc-400">Not scheduled</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-6 text-center">
+                  <Zap className="mx-auto mb-2 h-6 w-6 text-zinc-300" />
+                  <p className="font-mono text-sm text-zinc-500">No scheduled jobs</p>
+                  <p className="font-mono text-xs text-zinc-400">
+                    Enable Journey to start auto messaging
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Broadcast Actions */}

@@ -5,6 +5,7 @@ import {
   Loader2,
   MessageCircle,
   MoreVertical,
+  RefreshCw,
   Search,
   Send,
   Phone,
@@ -373,6 +374,25 @@ function WhatsAppShell() {
     }
   };
 
+  const refreshWebhookFlow = async () => {
+    if (!confirm("Refresh WhatsApp webhook? This fixes message receiving if it stopped after reconnect.")) return;
+    setQrLoading(true);
+    setError(null);
+    try {
+      const result = await whatsappAPI.refreshWebhook();
+      if (result.status === "configured") {
+        setError(null);
+        alert(`Webhook configured: ${result.webhook_url}`);
+      } else {
+        setError(result.message || "Failed to refresh webhook");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Refresh webhook failed");
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
   const sendDraft = async () => {
     if (!draft.trim() || !selectedPeer || sending) return;
     setSending(true);
@@ -478,6 +498,16 @@ function WhatsAppShell() {
             WhatsApp
           </span>
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Refresh webhook"
+              onClick={refreshWebhookFlow}
+              className="rounded p-2 hover:bg-white/10"
+              style={{ color: WA_MUTED }}
+              title="Refresh webhook (fixes message receiving)"
+            >
+              <RefreshCw className="h-5 w-5" />
+            </button>
             <button
               type="button"
               aria-label="Disconnect"

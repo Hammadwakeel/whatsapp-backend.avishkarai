@@ -11,9 +11,10 @@ from sqlalchemy import select, func, or_, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.models.wiki import WikiSource, WikiPage, WikiLink, WikiLog, SourceType, WikiPageType
 from app.schemas.wiki import (
-    SourceCreate, SourceUpdate, WikiPageCreate, WikiPageUpdate,
+    SourceCreate, WikiPageCreate, WikiPageUpdate,
     IngestRequest, IngestResponse, QueryRequest, QueryResponse,
     LintRequest, LintResponse, LintIssue,
     SourceResponse, WikiPageResponse, IndexResponse, LogListResponse
@@ -27,16 +28,18 @@ class WikiService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.llm = LLMService()
+        settings = get_settings()
         self.wiki_root = Path(settings.wiki_path) if hasattr(settings, 'wiki_path') else Path("wiki")
         self.sources_dir = self.wiki_root / "sources"
         self.pages_dir = self.wiki_root / "pages"
 
-    async def create_source(self, source_data: SourceCreate, content: str, user_id: Optional[str] = None) -> WikiSource:
+    async def create_source(self, source_data: SourceCreate, content: str, tenant_id: str, user_id: Optional[str] = None) -> WikiSource:
         """Create a new source entry"""
         # Save content to file
         file_path = self._save_source_file(content, source_data.title)
 
         source = WikiSource(
+            tenant_id=tenant_id,
             title=source_data.title,
             source_type=source_data.source_type,
             file_path=str(file_path),
@@ -91,11 +94,16 @@ class WikiService:
     async def create_wiki_page(
         self,
         page_data: WikiPageCreate,
+        tenant_id: str,
         user_id: Optional[str] = None,
         source: Optional[WikiSource] = None
     ) -> WikiPage:
         """Create a new wiki page"""
-        slug = slugify(page_data.title)
+        # Sanitize content - PostgreSQL doesn't accept null bytes
+        safe_content = page_data.content.replace('\x00', '')
+        safe_title = page_data.title.replace('\x00', '')
+
+        slug = slugify(safe_title)
 
         # Ensure unique slug
         base_slug = slug
@@ -114,7 +122,7 @@ class WikiService:
 
         # Generate frontmatter
         frontmatter = {
-            "title": page_data.title,
+            "title": safe_title,
             "type": page_data.page_type.value,
             "created": datetime.now(timezone.utc).isoformat(),
             "updated": datetime.now(timezone.utc).isoformat(),
@@ -123,17 +131,18 @@ class WikiService:
         }
 
         # Write to file
-        content = f"---\n{json.dumps(frontmatter, indent=2)}\n---\n\n{page_data.content}"
+        content = f"---\n{json.dumps(frontmatter, indent=2)}\n---\n\n{safe_content}"
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
 
         wiki_page = WikiPage(
-            title=page_data.title,
+            tenant_id=tenant_id,
+            title=safe_title,
             page_type=page_data.page_type,
             file_path=str(file_path),
             slug=slug,
-            summary=self._extract_summary(page_data.content),
-            content=page_data.content,
+            summary=self._extract_summary(safe_content),
+            content=safe_content,
             frontmatter=json.dumps(frontmatter),
             tags=json.dumps(page_data.tags) if page_data.tags else None,
             is_draft=page_data.is_draft,
@@ -143,7 +152,7 @@ class WikiService:
         self.db.add(wiki_page)
 
         # Create links from content
-        await self._extract_and_create_links(wiki_page)
+        await self._extract_and_create_links(wiki_page, tenant_id)
 
         await self.db.commit()
         await self.db.refresh(wiki_page)
@@ -158,7 +167,7 @@ class WikiService:
                 return p[:300] + ('...' if len(p) > 300 else '')
         return content[:300]
 
-    async def _extract_and_create_links(self, page: WikiPage):
+    async def _extract_and_create_links(self, page: WikiPage, tenant_id: str):
         """Extract [[wiki links]] from content and create link records"""
         wiki_link_pattern = re.compile(r'\[\[([^\]]+)\]\]')
         matches = wiki_link_pattern.findall(page.content)
@@ -171,6 +180,7 @@ class WikiService:
             target = result.scalar_one_or_none()
             if target:
                 link = WikiLink(
+                    tenant_id=tenant_id,
                     source_page_id=page.id,
                     target_page_id=target.id,
                     link_text=link_text,
@@ -213,10 +223,11 @@ class WikiService:
             return None
 
         if update_data.title is not None:
-            page.title = update_data.title
+            page.title = update_data.title.replace('\x00', '')
         if update_data.content is not None:
-            page.content = update_data.content
-            page.summary = self._extract_summary(update_data.content)
+            safe_content = update_data.content.replace('\x00', '')
+            page.content = safe_content
+            page.summary = self._extract_summary(safe_content)
         if update_data.tags is not None:
             page.tags = json.dumps(update_data.tags)
         if update_data.is_draft is not None:
@@ -316,6 +327,7 @@ class WikiService:
 
     async def log_operation(
         self,
+        tenant_id: str,
         operation: str,
         description: str,
         user_id: Optional[str] = None,
@@ -325,6 +337,7 @@ class WikiService:
     ) -> WikiLog:
         """Log a wiki operation"""
         log_entry = WikiLog(
+            tenant_id=tenant_id,
             operation=operation,
             description=description,
             user_id=user_id,
@@ -357,7 +370,7 @@ class WikiIngestService:
     async def ingest(
         self,
         ingest_request: IngestRequest,
-        user_id: Optional[str] = None
+        tenant_id: str
     ) -> IngestResponse:
         """Ingest a new source into the wiki"""
         created_pages = []
@@ -365,22 +378,22 @@ class WikiIngestService:
 
         # Create source
         source = await self.wiki_service.create_source(
-            WikiSourceCreate(
+            SourceCreate(
                 title=ingest_request.title,
                 source_type=ingest_request.source_type,
                 original_url=ingest_request.url,
-                tags=ingest_request.tags,
+                tags=ingest_request.tags or [],
                 extra_data=ingest_request.extra_data,
             ),
             ingest_request.content,
-            user_id
+            tenant_id
         )
 
         # Log the ingest operation
         log_entry = await self.wiki_service.log_operation(
+            tenant_id,
             operation="ingest",
             description=f"Ingested source: {ingest_request.title}",
-            user_id=user_id,
             source_id=source.id,
             details={"source_type": ingest_request.source_type.value}
         )
@@ -391,10 +404,10 @@ class WikiIngestService:
                 title=ingest_request.title,
                 page_type=WikiPageType.SOURCE,
                 content=ingest_request.content[:2000],
-                tags=ingest_request.tags,
+                tags=ingest_request.tags or [],
             ),
-            user_id,
-            source
+            tenant_id,
+            source=source
         )
         created_pages.append(source_summary)
 
@@ -415,9 +428,9 @@ class WikiIngestService:
             except Exception as e:
                 # Log error but don't fail the ingest
                 await self.wiki_service.log_operation(
+                    tenant_id,
                     operation="ingest_error",
                     description=f"LLM processing failed: {str(e)}",
-                    user_id=user_id,
                     source_id=source.id,
                 )
 
@@ -438,14 +451,15 @@ class WikiIngestService:
                             content=f"## {entity['name']}\n\n{entity.get('description', '')}\n\nReferenced in: [[{ingest_request.title}]]",
                             tags=["entity", entity.get("type", "other")],
                         ),
-                        user_id
+                        tenant_id=tenant_id,
+                        source=source
                     )
                     created_pages.append(entity_page)
             except Exception as e:
                 await self.wiki_service.log_operation(
+                    tenant_id,
                     operation="ingest_error",
                     description=f"Entity extraction failed: {str(e)}",
-                    user_id=user_id,
                     source_id=source.id,
                 )
 
@@ -465,7 +479,7 @@ class WikiQueryService:
         self.wiki_service = WikiService(db)
         self.llm = LLMService()
 
-    async def query(self, query_request: QueryRequest, user_id: Optional[str] = None) -> QueryResponse:
+    async def query(self, query_request: QueryRequest, tenant_id: str, user_id: Optional[str] = None) -> QueryResponse:
         """Query the wiki and get an answer"""
         # Search for relevant pages
         pages = await self.wiki_service.search_wiki(query_request.question, limit=query_request.max_pages)
@@ -497,9 +511,9 @@ class WikiQueryService:
 
         # Log the query
         await self.wiki_service.log_operation(
+            tenant_id,
             operation="query",
             description=f"Query: {query_request.question[:100]}",
-            user_id=user_id,
             details={"page_count": len(pages)}
         )
 
@@ -518,7 +532,7 @@ class WikiLintService:
         self.wiki_service = WikiService(db)
         self.llm = LLMService()
 
-    async def lint(self, lint_request: LintRequest, user_id: Optional[str] = None) -> LintResponse:
+    async def lint(self, lint_request: LintRequest, tenant_id: str, user_id: Optional[str] = None) -> LintResponse:
         """Run wiki health checks"""
         # Get all pages and recent sources
         pages_result = await self.db.execute(select(WikiPage).where(WikiPage.is_draft == False))
@@ -554,9 +568,9 @@ class WikiLintService:
 
         # Log the lint operation
         await self.wiki_service.log_operation(
+            tenant_id,
             operation="lint",
             description=f"Lint completed: {len(result.issues)} issues found",
-            user_id=user_id,
             details={"issue_count": len(result.issues)}
         )
 

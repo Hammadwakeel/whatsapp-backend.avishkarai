@@ -643,23 +643,6 @@ const deleteAgentConfig = async () => {
 
 ## Booking System Integration (External API)
 
-### Sync Guests from External Booking System
-
-```javascript
-const syncGuests = async () => {
-  const response = await fetch("http://localhost:8000/booking/sync", {
-    method: "POST",
-    headers: getAuthHeaders()
-  });
-
-  if (!response.ok) {
-    throw new Error((await response.json()).detail);
-  }
-
-  return response.json(); // { status, synced, total }
-};
-```
-
 ### List All Guests
 
 ```javascript
@@ -691,48 +674,6 @@ const getTodayBookings = async () => {
   }
 
   return response.json(); // { bookings: [...], total: 5 }
-};
-```
-
-### Find Guest by Phone
-
-```javascript
-const findGuestByPhone = async (mobile) => {
-  const response = await fetch(
-    `http://localhost:8000/booking/guests/phone/${encodeURIComponent(mobile)}`,
-    { headers: getAuthHeaders() }
-  );
-
-  if (response.status === 404) {
-    return null; // Guest not found
-  }
-
-  if (!response.ok) {
-    throw new Error((await response.json()).detail);
-  }
-
-  return response.json(); // Guest object
-};
-```
-
-### Find Guest by Room
-
-```javascript
-const findGuestByRoom = async (roomNumber) => {
-  const response = await fetch(
-    `http://localhost:8000/booking/guests/room/${encodeURIComponent(roomNumber)}`,
-    { headers: getAuthHeaders() }
-  );
-
-  if (response.status === 404) {
-    return null; // No active guest in this room
-  }
-
-  if (!response.ok) {
-    throw new Error((await response.json()).detail);
-  }
-
-  return response.json(); // Guest object
 };
 ```
 

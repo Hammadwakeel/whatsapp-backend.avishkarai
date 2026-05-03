@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Session data
+sessions/
+
+# Environment
+.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/

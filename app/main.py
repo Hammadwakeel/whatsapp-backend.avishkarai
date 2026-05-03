@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, AsyncSessionLocal
 from app.api.auth import router as auth_router
 from app.api import wiki_router
 from app.api.agent import router as agent_router
@@ -11,6 +11,7 @@ from app.api.whatsapp import router as whatsapp_router
 from app.api.webhook import router as webhook_router
 from app.api.booking import router as booking_router
 from app.api.journey import router as journey_router
+from app.services.journey.auto_scheduler import init_auto_scheduler, get_auto_scheduler
 
 settings = get_settings()
 
@@ -21,9 +22,16 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Initialize Journey Auto Scheduler
+    async with AsyncSessionLocal() as db:
+        await init_auto_scheduler(db)
+
     yield
 
-    # Shutdown
+    # Shutdown - stop the scheduler
+    scheduler = get_auto_scheduler()
+    scheduler.shutdown()
+
     await engine.dispose()
 
 

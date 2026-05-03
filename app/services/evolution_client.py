@@ -233,10 +233,11 @@ class EvolutionClient:
                 )
         return None
 
-    async def ensure_whatsapp_instance(self) -> bool:
+    async def ensure_whatsapp_instance(self, webhook_url: Optional[str] = None) -> bool:
         """
         Evolution API v2 requires an instance before connect/qrCode works.
         POST /instance/create when connectionState returns 404.
+        Optionally configure webhook URL for this instance.
         """
         self._qr_diag.pop("error", None)
         if not self.base_url:
@@ -250,24 +251,38 @@ class EvolutionClient:
             r = await client.get(f"/instance/connectionState/{self.instance_name}")
             self._qr_diag["connectionState_http"] = r.status_code
             if r.status_code == 200:
+                # Instance exists - ensure webhook is configured
+                if webhook_url:
+                    await self._configure_instance_webhook(client, webhook_url)
                 return True
             if r.status_code == 401:
                 self._qr_diag["error"] = "Evolution API returned 401 — verify EVOLUTION_API_KEY"
                 return False
             if r.status_code == 404:
+                # Create new instance with webhook configuration
+                create_payload = {
+                    "instanceName": self.instance_name,
+                    "integration": "WHATSAPP-BAILEYS",
+                    "qrcode": True,
+                }
+                if webhook_url:
+                    create_payload["webhook"] = {
+                        "url": webhook_url,
+                        "webhookByEvents": False,
+                        "webhookEvents": ["messages.upsert", "connection.update"],
+                    }
                 cr = await client.post(
                     "/instance/create",
-                    json={
-                        "instanceName": self.instance_name,
-                        "integration": "WHATSAPP-BAILEYS",
-                        "qrcode": True,
-                    },
+                    json=create_payload,
                 )
                 self._qr_diag["create_http"] = cr.status_code
                 if cr.status_code in (200, 201):
                     return True
                 low = cr.text.lower()
                 if cr.status_code == 403 and ("already" in low or "in use" in low):
+                    # Instance already exists - try to configure webhook
+                    if webhook_url:
+                        await self._configure_instance_webhook(client, webhook_url)
                     return True
                 self._qr_diag["create_error"] = cr.text[:800]
                 logger.warning(
@@ -282,6 +297,48 @@ class EvolutionClient:
             self._qr_diag["error"] = f"Evolution unreachable ({self.base_url}): {e}"
             logger.warning("ensure_whatsapp_instance: %s", e)
             return False
+
+    async def _configure_instance_webhook(self, client: httpx.AsyncClient, webhook_url: str) -> bool:
+        """Configure webhook URL for an existing Evolution instance."""
+        try:
+            settings_response = await client.get(f"/instance/settings/{self.instance_name}")
+            if settings_response.status_code != 200:
+                return False
+
+            current_settings = settings_response.json()
+            current_webhook_url = current_settings.get("webhook", {}).get("url", "")
+
+            # Skip if webhook URL is already correctly configured
+            if webhook_url in current_webhook_url:
+                return True
+
+            # Update webhook settings
+            update_payload = {
+                "instanceName": self.instance_name,
+                "webhook": {
+                    "url": webhook_url,
+                    "webhookByEvents": False,
+                    "webhookEvents": ["messages.upsert", "connection.update"],
+                    "enabled": True,
+                },
+            }
+            update_response = await client.post(
+                "/instance/settings",
+                json=update_payload,
+            )
+            if update_response.status_code in (200, 201):
+                logger.info(f"Configured webhook for instance {self.instance_name}: {webhook_url}")
+                return True
+            logger.warning(f"Failed to configure webhook for {self.instance_name}: {update_response.status_code}")
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to configure webhook for {self.instance_name}: {e}")
+            return False
+
+    async def configure_webhook(self, webhook_url: str) -> bool:
+        """Public method to configure webhook URL for this instance."""
+        client = await self._get_client()
+        return await self._configure_instance_webhook(client, webhook_url)
 
     async def poll_live_qr(self) -> Optional[str]:
         """
@@ -384,10 +441,14 @@ class EvolutionClient:
         }
         return messages.get(key, f"Status: {state}")
 
-    async def generate_qr_code(self) -> dict:
-        """Generate QR code for WhatsApp pairing (Evolution v2 + legacy v1)."""
+    async def generate_qr_code(self, webhook_url: Optional[str] = None) -> dict:
+        """Generate QR code for WhatsApp pairing (Evolution v2 + legacy v1).
+
+        Args:
+            webhook_url: Optional URL to configure for receiving webhooks on this instance.
+        """
         try:
-            await self.ensure_whatsapp_instance()
+            await self.ensure_whatsapp_instance(webhook_url=webhook_url)
 
             status = await self.get_connection_status()
 

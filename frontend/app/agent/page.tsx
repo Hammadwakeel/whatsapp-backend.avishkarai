@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Bot, MessageSquare, Brain, Save, Loader2, Trash2, Send, Check } from "lucide-react";
 import { agentAPI, AgentConfig } from "@/lib/api";
-import NavigationWrapper from "@/components/NavigationWrapper";
+
 
 export default function AgentPage() {
   return (

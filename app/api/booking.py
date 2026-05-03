@@ -1,5 +1,7 @@
 """Booking API Routes - Guest Management and External API Integration"""
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Any, Optional
@@ -19,7 +21,7 @@ from app.services.booking_service import (
     get_guests_by_status,
     sync_guests_to_db,
 )
-from app.services.inika_client import fetch_guest_inventory, fetch_todays_bookings
+from app.services.inika_client import fetch_guest_inventory
 
 router = APIRouter(prefix="/booking", tags=["Booking"])
 
@@ -65,9 +67,46 @@ class SyncResponse(BaseModel):
     error: Optional[str] = None
 
 
+class FetchResponse(BaseModel):
+    status: str
+    guests: list[dict[str, Any]] = []
+    total: int = 0
+    api_message: Optional[str] = None
+    api_status: Optional[Any] = None
+    error: Optional[str] = None
+
+
 # =============================================================================
 # External API Endpoints
 # =============================================================================
+
+@router.get("/fetch", response_model=FetchResponse)
+async def fetch_guests_from_booking_api(
+    current_tenant: Tenant = Depends(get_current_tenant),
+):
+    """
+    Call getTodaysBookings on the external Inika/Payfiller API and return guest rows
+    (id, tid, rid, room, gname, etc.) without writing to the database.
+    """
+    result = await fetch_guest_inventory(str(current_tenant.id))
+
+    if result.get("status") == "error":
+        return FetchResponse(
+            status="error",
+            error=result.get("error"),
+            guests=[],
+            total=0,
+        )
+
+    guests = result.get("guests") or []
+    return FetchResponse(
+        status="ok",
+        guests=guests,
+        total=len(guests),
+        api_message=result.get("api_message"),
+        api_status=result.get("api_status"),
+    )
+
 
 @router.post("/sync", response_model=SyncResponse)
 async def sync_guests_from_external_api(
@@ -83,43 +122,20 @@ async def sync_guests_from_external_api(
         raise HTTPException(status_code=500, detail=result.get("error"))
 
     try:
-        import json
-        data = result.get("data", "")
-
-        # Parse response data
-        if isinstance(data, str):
-            guest_data = json.loads(data)
-        else:
-            guest_data = data
+        guest_data = result.get("guests") or []
 
         if not isinstance(guest_data, list):
             raise HTTPException(status_code=500, detail="Invalid data format from API")
 
-        # Sync to database
         synced = await sync_guests_to_db(str(current_tenant.id), guest_data)
 
         return SyncResponse(
             status="ok",
             synced=synced,
-            total=len(guest_data)
+            total=len(guest_data),
         )
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse API response: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/fetch")
-async def fetch_guests_from_api(
-    current_tenant: Tenant = Depends(get_current_tenant),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Fetch guest inventory from external API (without syncing).
-    Returns raw data from the external booking system.
-    """
-    result = await fetch_guest_inventory(str(current_tenant.id))
-    return result
 
 
 # =============================================================================
@@ -172,40 +188,6 @@ async def get_guest(
     Get guest details by ID.
     """
     guest = await get_guest_by_id(str(current_tenant.id), guest_id)
-
-    if not guest:
-        raise HTTPException(status_code=404, detail="Guest not found")
-
-    return guest
-
-
-@router.get("/guests/room/{room}")
-async def get_guest_by_room_number(
-    room: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Get current guest in a specific room.
-    """
-    guest = await get_guest_by_room(str(current_tenant.id), room)
-
-    if not guest:
-        raise HTTPException(status_code=404, detail="No active guest in this room")
-
-    return guest
-
-
-@router.get("/guests/phone/{mobile}")
-async def get_guest_by_phone(
-    mobile: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Find guest by mobile number.
-    """
-    guest = await get_guest_by_mobile(str(current_tenant.id), mobile)
 
     if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")

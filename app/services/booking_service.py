@@ -7,7 +7,7 @@ import time
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import Column, String, Integer, DateTime, Text, select, and_
+from sqlalchemy import Column, String, Integer, DateTime, Text, select, and_, or_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,13 +111,24 @@ async def sync_guests_to_db(tenant_id: str, guest_data: list[dict[str, Any]]) ->
 
 
 async def get_active_guests(tenant_id: str) -> list[dict[str, Any]]:
-    """Get all active guests (Arrived, Confirmed, StayOver, Due In)."""
+    """Get all active guests (Arrived, Confirmed, StayOver, Due In).
+
+    Rows with empty or unknown status are included so minimal getTodaysBookings
+    payloads (e.g. only gname/room) still appear after sync.
+    """
     async with AsyncSessionLocal() as session:
+        status_ok = GuestInventory.gstatus.in_(
+            ["Arrived", "Confirmed", "StayOver", "Due In"]
+        )
+        status_unknown = or_(
+            GuestInventory.gstatus == "",
+            GuestInventory.gstatus.is_(None),
+        )
         result = await session.execute(
             select(GuestInventory).where(
                 and_(
                     GuestInventory.tenant_id == tenant_id,
-                    GuestInventory.gstatus.in_(["Arrived", "Confirmed", "StayOver", "Due In"])
+                    or_(status_ok, status_unknown),
                 )
             ).order_by(GuestInventory.cindate.desc())
         )
@@ -142,13 +153,18 @@ async def get_guest_by_mobile(tenant_id: str, mobile: str) -> dict[str, Any] | N
 
 async def get_guest_by_room(tenant_id: str, room: str) -> dict[str, Any] | None:
     """Find currently staying guest by room number."""
+    in_house = or_(
+        GuestInventory.gstatus.in_(["Arrived", "StayOver"]),
+        GuestInventory.gstatus == "",
+        GuestInventory.gstatus.is_(None),
+    )
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(GuestInventory).where(
                 and_(
                     GuestInventory.tenant_id == tenant_id,
                     GuestInventory.room == room,
-                    GuestInventory.gstatus.in_(["Arrived", "StayOver"])
+                    in_house,
                 )
             ).order_by(GuestInventory.synced_at.desc()).limit(1)
         )

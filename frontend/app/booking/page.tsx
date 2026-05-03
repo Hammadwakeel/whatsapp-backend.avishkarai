@@ -3,13 +3,13 @@
 import { useEffect, useState } from "react";
 import { Calendar, RefreshCw, Loader2, CheckCircle, XCircle, Clock, Users, Bed } from "lucide-react";
 import { bookingAPI, BookingGuest, BookingStats } from "@/lib/api";
-import NavigationWrapper from "@/components/NavigationWrapper";
+
 
 export default function BookingPage() {
   return (
-    <NavigationWrapper>
+    <div className="min-h-screen overflow-x-hidden bg-white">
       <BookingContent />
-    </NavigationWrapper>
+    </div>
   );
 }
 

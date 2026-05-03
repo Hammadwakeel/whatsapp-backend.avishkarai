@@ -73,10 +73,10 @@ class JourneyScheduler:
                 weather = await self.weather_service.get_weather_by_city(
                     hotel_location["city"]
                 )
-            elif hotel_location.get("lat") and hotel_location.get("lon"):
+            elif hotel_location.get("lat") is not None and hotel_location.get("lon") is not None:
                 weather = await self.weather_service.get_current_weather(
-                    hotel_location["lat"],
-                    hotel_location["lon"]
+                    float(hotel_location["lat"]),
+                    float(hotel_location["lon"]),
                 )
 
         results["weather"] = weather
@@ -162,6 +162,13 @@ class JourneyScheduler:
                 weather = await self.weather_service.get_weather_by_city(
                     hotel_location["city"]
                 )
+            elif hotel_location.get("lat") is not None and hotel_location.get(
+                "lon"
+            ) is not None:
+                weather = await self.weather_service.get_current_weather(
+                    float(hotel_location["lat"]),
+                    float(hotel_location["lon"]),
+                )
 
         # Map status to message type
         status_to_type = {
@@ -234,6 +241,13 @@ class JourneyScheduler:
             if hotel_location.get("city"):
                 weather = await self.weather_service.get_weather_by_city(
                     hotel_location["city"]
+                )
+            elif hotel_location.get("lat") is not None and hotel_location.get(
+                "lon"
+            ) is not None:
+                weather = await self.weather_service.get_current_weather(
+                    float(hotel_location["lat"]),
+                    float(hotel_location["lon"]),
                 )
 
         if not weather or weather.get("status") != "ok":

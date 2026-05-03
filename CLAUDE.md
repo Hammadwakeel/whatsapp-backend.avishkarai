@@ -99,7 +99,7 @@ inika-backend/
 
 ### Booking System (External API Integration)
 - Sync guest inventory from external booking system
-- Guest lookup by ID, phone, or room number
+- Guest lookup by ID or status filter
 - Journey tracking with milestones
 - Booking statistics and today's operations
 

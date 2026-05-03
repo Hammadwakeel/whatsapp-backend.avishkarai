@@ -71,28 +71,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 2. Fetch Guests (Raw Data)
-
-Fetch guest data from external API without syncing to local database.
-
-**Endpoint**: `GET /booking/fetch`
-
-**Headers**:
-```
-Authorization: Bearer <access_token>
-```
-
-**Response** (200 OK):
-```json
-{
-  "status": "ok",
-  "data": "[...]"
-}
-```
-
----
-
-### 3. List All Guests
+### 2. List All Guests
 
 Get all active guests, optionally filtered by status.
 
@@ -137,7 +116,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 4. Get Today's Bookings
+### 3. Get Today's Bookings
 
 Get today's check-ins and check-outs.
 
@@ -158,7 +137,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 5. Get Guest by ID
+### 4. Get Guest by ID
 
 **Endpoint**: `GET /booking/guests/{guest_id}`
 
@@ -182,43 +161,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 6. Get Guest by Room
-
-Get the current guest in a specific room.
-
-**Endpoint**: `GET /booking/guests/room/{room}`
-
-**Headers**:
-```
-Authorization: Bearer <access_token>
-```
-
-**Response** (200 OK): Returns guest object
-
-**Errors**:
-- `404`: No active guest in this room
-
----
-
-### 7. Get Guest by Phone
-
-Find guest by mobile number.
-
-**Endpoint**: `GET /booking/guests/phone/{mobile}`
-
-**Headers**:
-```
-Authorization: Bearer <access_token>
-```
-
-**Response** (200 OK): Returns guest object
-
-**Errors**:
-- `404`: Guest not found
-
----
-
-### 8. Get Guest Journey
+### 5. Get Guest Journey
 
 Get guest journey status with milestones.
 
@@ -260,7 +203,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 9. Get Booking Statistics
+### 6. Get Booking Statistics
 
 **Endpoint**: `GET /booking/stats`
 
@@ -393,95 +336,6 @@ export default function GuestList() {
           ))}
         </tbody>
       </table>
-    </div>
-  );
-}
-```
-
-### React - Guest Lookup
-
-```jsx
-import { useState } from 'react';
-
-export default function GuestLookup() {
-  const [searchType, setSearchType] = useState('mobile');
-  const [searchValue, setSearchValue] = useState('');
-  const [guest, setGuest] = useState(null);
-  const [error, setError] = useState(null);
-
-  const getAuthHeaders = () => ({
-    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-  });
-
-  const lookupGuest = async () => {
-    if (!searchValue) return;
-
-    try {
-      const endpoint = searchType === 'mobile'
-        ? `/booking/guests/phone/${searchValue}`
-        : `/booking/guests/room/${searchValue}`;
-
-      const response = await fetch(endpoint, { headers: getAuthHeaders() });
-
-      if (response.status === 404) {
-        setError('Guest not found');
-        setGuest(null);
-        return;
-      }
-
-      const data = await response.json();
-      setGuest(data);
-      setError(null);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  return (
-    <div className="guest-lookup">
-      <h2>Find Guest</h2>
-
-      <div className="search-form">
-        <select
-          value={searchType}
-          onChange={(e) => setSearchType(e.target.value)}
-        >
-          <option value="mobile">By Phone Number</option>
-          <option value="room">By Room Number</option>
-        </select>
-
-        <input
-          type="text"
-          value={searchValue}
-          onChange={(e) => setSearchValue(e.target.value)}
-          placeholder={
-            searchType === 'mobile'
-              ? 'Enter phone number'
-              : 'Enter room number'
-          }
-        />
-
-        <button onClick={lookupGuest}>Search</button>
-      </div>
-
-      {error && <div className="error">{error}</div>}
-
-      {guest && (
-        <div className="guest-details">
-          <h3>{guest.gname}</h3>
-          <p>Room: {guest.room}</p>
-          <p>Phone: {guest.mobile}</p>
-          <p>Status: {guest.gstatus}</p>
-          <p>Check-in: {guest.cindate}</p>
-          <p>Check-out: {guest.coutdate}</p>
-
-          <button
-            onClick={() => window.location.href = `/guests/${guest.id}/journey`}
-          >
-            View Journey
-          </button>
-        </div>
-      )}
     </div>
   );
 }

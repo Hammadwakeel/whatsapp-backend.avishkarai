@@ -18,7 +18,8 @@ class TestWhatsAppStatus:
         assert response.status_code == 200
         data = response.json()
         assert data["is_connected"] is False
-        assert data["status"] == "disconnected"
+        # Evolution reports close/disconnected or connecting when not linked yet
+        assert data["status"].lower() in ("disconnected", "close", "connecting")
         assert data["phone_number"] is None
 
 

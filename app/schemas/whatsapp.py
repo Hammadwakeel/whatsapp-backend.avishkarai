@@ -51,11 +51,15 @@ class WhatsAppStatusResponse(BaseModel):
     """Schema for WhatsApp status response"""
     is_connected: bool
     status: str
+    qrcode: Optional[str] = None
     phone_number: Optional[str]
     display_name: Optional[str]
     connected_at: Optional[datetime]
     last_activity: Optional[datetime]
     message_count: int
+    local_session_id: Optional[str] = None
+    pairing_code: Optional[str] = None
+    evolution_detail: Optional[str] = None
 
 
 class QRCodeResponse(BaseModel):
@@ -108,3 +112,9 @@ class MessageListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class WhatsAppSendRequest(BaseModel):
+    """Manual outbound message from dashboard"""
+    to: str
+    message: str

@@ -9,6 +9,11 @@ from app.services.journey.message_generator import (
 from app.services.journey.guest_selector import GuestSelector, get_active_guests_for_journey
 from app.services.journey.message_sender import JourneyMessageSender, send_journey_message
 from app.services.journey.scheduler import JourneyScheduler
+from app.services.journey.auto_scheduler import (
+    JourneyAutoScheduler,
+    get_auto_scheduler,
+    init_auto_scheduler,
+)
 
 __all__ = [
     "WeatherService",
@@ -21,4 +26,7 @@ __all__ = [
     "JourneyMessageSender",
     "send_journey_message",
     "JourneyScheduler",
+    "JourneyAutoScheduler",
+    "get_auto_scheduler",
+    "init_auto_scheduler",
 ]

@@ -537,6 +537,25 @@ export const whatsappAPI = {
     return response.json();
   },
 
+  /**
+   * Refresh webhook configuration for WhatsApp instance.
+   * Use this if messages stopped being received after a reconnect.
+   */
+  async refreshWebhook(): Promise<{
+    status: string;
+    webhook_url?: string;
+    instance_name?: string;
+    message?: string;
+  }> {
+    const base = getApiBaseUrl();
+    const response = await fetch(`${base}/whatsapp/refresh-webhook`, {
+      method: "POST",
+      headers: jsonAuthHeaders(),
+    });
+    if (!response.ok) throw new Error("Failed to refresh webhook");
+    return response.json();
+  },
+
   async getQRCode(): Promise<{ qrcode: string } | null> {
     const base = getApiBaseUrl();
     const response = await fetch(`${base}/whatsapp/qrcode`, {

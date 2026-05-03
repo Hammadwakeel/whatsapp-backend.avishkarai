@@ -82,7 +82,7 @@ export default function DashboardOpsStatus() {
         newModules.push({
           name: "Knowledge",
           status: index.total_pages > 0 ? "active" : "inactive",
-          info: `${index.total_pages} pages / ${index.total_vectors} vectors`
+          info: `${index.total_pages} pages / ${index.total_sources} sources`
         });
       } catch {
         newModules.push({ name: "Knowledge", status: "unknown", info: "..." });

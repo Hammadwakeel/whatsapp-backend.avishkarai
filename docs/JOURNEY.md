@@ -7,11 +7,12 @@ Complete guide for the AI-powered guest journey messaging system.
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Message Types](#message-types)
-3. [Endpoints](#endpoints)
-4. [Configuration](#configuration)
-5. [Frontend Integration](#frontend-integration)
-6. [Message Flow](#message-flow)
+2. [Auto Scheduler](#auto-scheduler)
+3. [Message Types](#message-types)
+4. [Endpoints](#endpoints)
+5. [Configuration](#configuration)
+6. [Frontend Integration](#frontend-integration)
+7. [Message Flow](#message-flow)
 
 ---
 
@@ -25,6 +26,62 @@ The Journey module provides intelligent, contextual messaging to hotel guests ba
 | **Weather** | Contextual suggestions based on current weather |
 | **Guest Status** | Due In, Arrived, StayOver, Checkout |
 | **AI Conversation** | Full conversational support via WhatsApp |
+
+---
+
+## Auto Scheduler
+
+The Journey module includes a fully autonomous background scheduler that runs messaging jobs automatically without manual intervention.
+
+### How It Works
+
+The scheduler is integrated into the FastAPI app lifecycle:
+
+1. **Startup**: When the backend starts, `init_auto_scheduler()` loads all active Journey configs and schedules jobs
+2. **Runtime**: APScheduler runs jobs based on configured times
+3. **Config Updates**: When journey config changes, jobs are automatically rescheduled
+4. **Shutdown**: Scheduler gracefully stops when the app shuts down
+
+### Scheduled Jobs Per Tenant
+
+| Job ID | Schedule | Description |
+|--------|----------|-------------|
+| `{tenant_id}_morning` | Configured morning hour | Send morning message |
+| `{tenant_id}_breakfast` | Configured breakfast hour | Meal reminder |
+| `{tenant_id}_lunch` | Configured lunch hour | Meal reminder |
+| `{tenant_id}_dinner` | Configured dinner hour | Meal reminder |
+| `{tenant_id}_evening` | Configured evening hour | Evening message |
+| `{tenant_id}_due_in_check` | Every 30 min (8 AM - 5 PM) | Check for arriving guests |
+| `{tenant_id}_checkout_check` | 10 AM daily | Check for checkout guests |
+
+### Anti-Duplication Protection
+
+The scheduler uses `_active_jobs` tracking to prevent duplicate runs:
+
+```
+if self._active_jobs.get(tenant_id):
+    return  # Skip if already running
+```
+
+### Rate Limiting
+
+Each guest receives a maximum of `max_messages_per_day` messages per day (default: 5). The scheduler checks `JourneyMessageLog` before sending.
+
+### Files
+
+- `app/services/journey/auto_scheduler.py` - Main scheduler implementation
+- `app/services/journey/__init__.py` - Exports scheduler functions
+- `app/main.py` - Scheduler lifecycle integration
+
+### Testing
+
+```bash
+# Run auto scheduler tests
+python -m pytest tests/test_journey_auto_scheduler.py -v
+
+# All Journey tests
+python -m pytest tests/test_journey.py tests/test_journey_auto_scheduler.py -v
+```
 
 ---
 
@@ -421,24 +478,36 @@ const sendMessageToGuest = async (guestId, messageType) => {
 
 ## Message Flow
 
-### Scheduled Message Cycle
+### Automated Message Cycle (Auto Scheduler)
 
 ```
-1. Scheduler triggers (cron or external)
+1. APScheduler triggers job at configured time
    ↓
-2. Get JourneyConfig for tenant
+2. Check _active_jobs to prevent duplicates
    ↓
-3. Fetch current weather (OpenWeatherMap)
+3. Get JourneyConfig for tenant
    ↓
-4. Get active guests from booking system
+4. Fetch current weather (OpenWeatherMap)
    ↓
-5. For each guest:
-   a. Check rate limiting (max 5/day)
+5. Get active guests from booking system
+   ↓
+6. For each guest:
+   a. Check rate limiting (max 5/day via JourneyMessageLog)
    b. Generate contextual message (AI + weather + wiki)
    c. Send via WhatsApp (Evolution API)
    d. Log message to JourneyMessageLog
    ↓
-6. Return results (sent count, errors)
+7. Reset active flag for tenant
+```
+
+### Manual Broadcast (API)
+
+```
+1. Admin calls POST /journey/send/broadcast
+   ↓
+2. JourneyScheduler.run_journey_cycle()
+   ↓
+3. (Same as step 3-7 above)
 ```
 
 ### Incoming Message Flow

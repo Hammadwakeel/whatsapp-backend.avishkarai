@@ -30,6 +30,67 @@ from app.services.journey import (
 router = APIRouter(prefix="/journey", tags=["Journey"])
 
 
+async def weather_from_journey_config(db: AsyncSession, tenant_id: str) -> dict:
+    """Resolve OpenWeather call from saved JourneyConfig (city or lat/lon)."""
+    from sqlalchemy import select
+
+    weather_service = WeatherService()
+    result = await db.execute(
+        select(JourneyConfig).where(JourneyConfig.tenant_id == tenant_id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        return {
+            "status": "no_location",
+            "temperature": None,
+            "condition": None,
+            "description": None,
+            "city": None,
+        }
+    city = (config.hotel_city or "").strip()
+    if city:
+        return await weather_service.get_weather_by_city(city)
+    lat_s = config.hotel_latitude
+    lon_s = config.hotel_longitude
+    if lat_s and lon_s:
+        try:
+            return await weather_service.get_current_weather(
+                float(lat_s), float(lon_s)
+            )
+        except (TypeError, ValueError):
+            return {
+                "status": "error",
+                "temperature": None,
+                "condition": None,
+                "description": None,
+                "city": None,
+            }
+    return {
+        "status": "no_location",
+        "temperature": None,
+        "condition": None,
+        "description": None,
+        "city": None,
+    }
+
+
+def _apply_journey_config_payload(config: JourneyConfig, data: dict[str, Any]) -> None:
+    """Merge update payload; allow clearing hotel location fields."""
+    loc_keys = frozenset({"hotel_city", "hotel_latitude", "hotel_longitude"})
+    for key, value in data.items():
+        if not hasattr(config, key):
+            continue
+        if key in loc_keys:
+            if value is None or value == "":
+                setattr(config, key, None)
+            elif key == "hotel_city":
+                setattr(config, key, str(value).strip() or None)
+            else:
+                setattr(config, key, str(value).strip() or None)
+        elif value is not None:
+            setattr(config, key, value)
+
+
 # =============================================================================
 # Schemas
 # =============================================================================
@@ -42,8 +103,8 @@ class JourneyConfigCreate(BaseModel):
     dinner_hour: int = 18
     evening_hour: int = 20
     hotel_city: Optional[str] = None
-    hotel_latitude: Optional[float] = None
-    hotel_longitude: Optional[float] = None
+    hotel_latitude: Optional[str] = None
+    hotel_longitude: Optional[str] = None
     enable_weather_based: bool = True
     enable_meal_reminders: bool = True
     enable_status_messages: bool = True
@@ -65,8 +126,11 @@ class JourneyConfigResponse(BaseModel):
     dinner_hour: int
     evening_hour: int
     hotel_city: Optional[str]
+    hotel_latitude: Optional[str]
+    hotel_longitude: Optional[str]
     enable_weather_based: bool
     enable_meal_reminders: bool
+    enable_status_messages: bool
     enable_conversation: bool
     max_messages_per_day: int
     include_due_in: bool
@@ -80,10 +144,10 @@ class JourneyConfigResponse(BaseModel):
 
 class WeatherResponse(BaseModel):
     status: str
-    temperature: Optional[float]
-    condition: Optional[str]
-    description: Optional[str]
-    city: Optional[str]
+    temperature: Optional[float] = None
+    condition: Optional[str] = None
+    description: Optional[str] = None
+    city: Optional[str] = None
 
 
 class SendMessageRequest(BaseModel):
@@ -125,12 +189,12 @@ async def get_journey_config(
     config = result.scalar_one_or_none()
 
     if not config:
-        # Create default config
+        # Create default config (hotel location set by tenant via UI / API)
         config = JourneyConfig(
             id=str(uuid.uuid4()),
             tenant_id=str(current_tenant.id),
             is_enabled=True,
-            hotel_city="Lahore",  # Default city
+            hotel_city=None,
         )
         db.add(config)
         await db.commit()
@@ -149,28 +213,32 @@ async def update_journey_config(
 ):
     """Update journey configuration."""
     from sqlalchemy import select
+    from app.services.journey.auto_scheduler import get_auto_scheduler
 
     result = await db.execute(
         select(JourneyConfig).where(JourneyConfig.tenant_id == str(current_tenant.id))
     )
     config = result.scalar_one_or_none()
 
+    dump = config_data.model_dump()
+
     if config:
-        # Update existing
-        for key, value in config_data.model_dump().items():
-            if hasattr(config, key) and value is not None:
-                setattr(config, key, value)
+        _apply_journey_config_payload(config, dump)
     else:
-        # Create new
         config = JourneyConfig(
             id=str(current_tenant.id),
             tenant_id=str(current_tenant.id),
-            **config_data.model_dump()
         )
+        _apply_journey_config_payload(config, dump)
         db.add(config)
 
     await db.commit()
     await db.refresh(config)
+
+    # Update scheduler with new config
+    scheduler = get_auto_scheduler()
+    await scheduler.update_tenant_schedule(db, str(current_tenant.id))
+
     return config
 
 
@@ -181,6 +249,7 @@ async def enable_journey(
 ):
     """Enable journey messaging."""
     from sqlalchemy import select
+    from app.services.journey.auto_scheduler import get_auto_scheduler
 
     result = await db.execute(
         select(JourneyConfig).where(JourneyConfig.tenant_id == str(current_tenant.id))
@@ -198,6 +267,11 @@ async def enable_journey(
         db.add(config)
 
     await db.commit()
+
+    # Reschedule if newly created or updated
+    scheduler = get_auto_scheduler()
+    await scheduler.update_tenant_schedule(db, str(current_tenant.id))
+
     return {"status": "ok", "message": "Journey enabled"}
 
 
@@ -208,6 +282,7 @@ async def disable_journey(
 ):
     """Disable journey messaging."""
     from sqlalchemy import select
+    from app.services.journey.auto_scheduler import get_auto_scheduler
 
     result = await db.execute(
         select(JourneyConfig).where(JourneyConfig.tenant_id == str(current_tenant.id))
@@ -217,6 +292,10 @@ async def disable_journey(
     if config:
         config.is_enabled = False
         await db.commit()
+
+    # Remove from scheduler
+    scheduler = get_auto_scheduler()
+    scheduler.remove_tenant_schedule(str(current_tenant.id))
 
     return {"status": "ok", "message": "Journey disabled"}
 
@@ -231,17 +310,17 @@ async def get_current_weather(
     lat: float = Query(None),
     lon: float = Query(None),
     current_tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get current weather for hotel location."""
+    """Get current weather. Query params override saved journey location (city or lat/lon)."""
     weather_service = WeatherService()
 
     if city:
         weather = await weather_service.get_weather_by_city(city)
-    elif lat and lon:
+    elif lat is not None and lon is not None:
         weather = await weather_service.get_current_weather(lat, lon)
     else:
-        # Try to get from config
-        weather = await weather_service.get_weather_by_city("Lahore")
+        weather = await weather_from_journey_config(db, str(current_tenant.id))
 
     return weather
 
@@ -294,9 +373,7 @@ async def send_journey_message_to_guest(
 
     guest_data = guest.to_dict()
 
-    # Get weather
-    weather_service = WeatherService()
-    weather = await weather_service.get_weather_by_city("Lahore")
+    weather = await weather_from_journey_config(db, str(current_tenant.id))
 
     # Generate or use custom message
     if request.custom_message:
@@ -377,6 +454,11 @@ async def send_due_in_messages(
     hotel_location = None
     if config and config.hotel_city:
         hotel_location = {"city": config.hotel_city}
+    elif config and config.hotel_latitude and config.hotel_longitude:
+        hotel_location = {
+            "lat": float(config.hotel_latitude),
+            "lon": float(config.hotel_longitude),
+        }
 
     result = await scheduler.send_status_based_messages(
         tenant_id=str(current_tenant.id),
@@ -528,4 +610,51 @@ async def handle_conversation(
         "guest_name": guest.get("gname"),
         "room": guest.get("room"),
         "wiki_context": result.get("wiki_context"),
+    }
+
+
+# =============================================================================
+# Auto Scheduler Status
+# =============================================================================
+
+@router.get("/scheduler/status")
+async def get_scheduler_status(
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get auto scheduler status for current tenant."""
+    from app.services.journey.auto_scheduler import get_auto_scheduler
+
+    tenant_id = str(current_tenant.id)
+    scheduler = get_auto_scheduler()
+
+    # Check if tenant has jobs scheduled
+    job_ids = [
+        f"{tenant_id}_morning",
+        f"{tenant_id}_breakfast",
+        f"{tenant_id}_lunch",
+        f"{tenant_id}_dinner",
+        f"{tenant_id}_evening",
+        f"{tenant_id}_due_in_check",
+        f"{tenant_id}_checkout_check",
+    ]
+
+    scheduled_jobs = []
+    for job_id in job_ids:
+        try:
+            job = scheduler._scheduler.get_job(job_id)
+            if job:
+                next_run = job.next_run_time.isoformat() if job.next_run_time else None
+                scheduled_jobs.append({
+                    "job_id": job_id,
+                    "next_run": next_run,
+                    "active": scheduler._active_jobs.get(tenant_id, False),
+                })
+        except Exception:
+            pass
+
+    return {
+        "scheduler_running": scheduler._scheduler.running,
+        "tenant_scheduled": len(scheduled_jobs) > 0,
+        "jobs": scheduled_jobs,
     }

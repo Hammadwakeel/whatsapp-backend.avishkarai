@@ -28,9 +28,12 @@ export default function DashboardRecentActivity() {
             activities.push({
               id: `msg-${msg.id}`,
               type: "message",
-              title: msg.direction === "inbound" ? `From ${msg.from}` : `To ${msg.to}`,
+              title:
+                msg.direction === "inbound"
+                  ? `From ${msg.from_number}`
+                  : `To ${msg.to_number || "guest"}`,
               description: msg.content.substring(0, 50) + (msg.content.length > 50 ? "..." : ""),
-              time: new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              time: new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             });
           });
         } catch {
