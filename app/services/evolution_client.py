@@ -1,11 +1,12 @@
 """Evolution API Client - Manages WhatsApp sessions via Evolution API"""
 
-import httpx
-import json
+import asyncio
 import base64
-from typing import Optional, Dict, Any
-from datetime import datetime
 import logging
+from typing import Any, Optional
+
+import httpx
+from datetime import datetime
 
 from app.core.config import get_settings
 
@@ -16,11 +17,41 @@ settings = get_settings()
 class EvolutionClient:
     """Client for Evolution API - Free WhatsApp Gateway"""
 
-    def __init__(self):
+    def __init__(self, instance_name: Optional[str] = None):
+        """
+        Create an EvolutionClient instance.
+
+        Args:
+            instance_name: Tenant-specific instance name. If None, uses config default.
+                          For per-tenant isolation, pass tenant-specific name like f"inika-{tenant_id[:8]}"
+        """
         self.base_url = settings.evolution_url.rstrip("/")
         self.api_key = settings.evolution_api_key
-        self.instance_name = settings.evolution_instance_name
+        self.instance_name = instance_name or settings.evolution_instance_name
         self._client: Optional[httpx.AsyncClient] = None
+        self._qr_diag: dict[str, Any] = {}
+        self._last_pairing_code: Optional[str] = None
+
+    def evolution_user_hint(self) -> Optional[str]:
+        """Short message for API/UI when QR cannot be loaded."""
+        if self._qr_diag.get("error"):
+            return str(self._qr_diag["error"])
+        if self._qr_diag.get("create_error"):
+            return f"Evolution create instance: {str(self._qr_diag['create_error'])[:220]}"
+        if self._qr_diag.get("connect_error"):
+            return str(self._qr_diag["connect_error"])[:220]
+        if self._qr_diag.get("connectionState_error"):
+            return f"connectionState: {str(self._qr_diag['connectionState_error'])[:180]}"
+        ch = self._qr_diag.get("create_http")
+        cs = self._qr_diag.get("connectionState_http")
+        if ch and ch not in (200, 201):
+            return f"HTTP create instance returned {ch}"
+        if cs and cs not in (200, 404):
+            return f"Evolution HTTP {cs} — check EVOLUTION_URL and apikey"
+        return None
+
+    def get_pairing_code(self) -> Optional[str]:
+        return self._last_pairing_code
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -56,6 +87,243 @@ class EvolutionClient:
             logger.error(f"Evolution health check failed: {e}")
             return {"ok": False, "error": str(e)}
 
+    def _extract_instance_state(self, data: dict) -> str:
+        """Evolution v1 uses top-level state; v2 nests under instance.state."""
+        inst = data.get("instance")
+        if isinstance(inst, dict) and inst.get("state") is not None:
+            return str(inst.get("state", ""))
+        if data.get("state") is not None:
+            return str(data.get("state", ""))
+        return "close"
+
+    def _state_connected(self, state: str) -> bool:
+        s = (state or "").strip().upper()
+        return s in ("CONNECTED", "OPEN", "READY")
+
+    def _extract_qr_from_payload(self, data: Optional[Any]) -> Optional[Any]:
+        """Evolution v2 connect returns `code`/`base64`; older APIs used `qrCode` / `qrcode`."""
+        if isinstance(data, list) and data:
+            data = data[0]
+        if not data or not isinstance(data, dict):
+            return None
+        qr = (
+            data.get("qrCode")
+            or data.get("qrcode")
+            or data.get("qrOrCode")
+            or data.get("base64")
+            or data.get("code")
+        )
+        if isinstance(qr, dict):
+            qr = qr.get("base64") or qr.get("code") or qr.get("qrCode")
+        return qr
+
+    def _normalize_image_string(self, img: Optional[str]) -> Optional[str]:
+        if not img or not isinstance(img, str):
+            return None
+        s = img.strip()
+        if not s:
+            return None
+        if s.startswith("data:image"):
+            return s
+        if s.startswith(("iVBOR", "/9j/")):
+            return f"data:image/png;base64,{s}"
+        return s
+
+    def _parse_qr_http_response(self, response: httpx.Response) -> Optional[str]:
+        """Evolution may return JSON with base64, or raw PNG/JPEG bytes."""
+        if response.status_code != 200:
+            return None
+        body = response.content or b""
+        ct = (response.headers.get("content-type") or "").lower()
+        if body[:1] == b"{" or "application/json" in ct:
+            try:
+                data = response.json()
+            except Exception:
+                return None
+            if not isinstance(data, dict):
+                return None
+            img = (
+                data.get("qrcode")
+                or data.get("qrCode")
+                or data.get("base64")
+                or data.get("code")
+            )
+            if isinstance(img, dict):
+                img = img.get("base64") or img.get("qrcode") or img.get("qrCode")
+            return self._normalize_image_string(str(img)) if img else None
+        if body.startswith(b"\x89PNG") or body.startswith(b"\xff\xd8\xff") or "image" in ct:
+            b64 = base64.b64encode(body).decode("ascii")
+            mime = "image/png" if body.startswith(b"\x89PNG") else "image/jpeg"
+            return f"data:{mime};base64,{b64}"
+        return None
+
+    async def _fetch_qr_image_multi(self) -> Optional[str]:
+        """Try common Evolution routes for the QR PNG/base64."""
+        client = await self._get_client()
+        paths = [
+            f"/instance/qrCode/{self.instance_name}",
+            f"/instance/qrcode/{self.instance_name}",
+        ]
+        for path in paths:
+            try:
+                response = await client.get(path)
+                parsed = self._parse_qr_http_response(response)
+                if parsed:
+                    return parsed
+            except Exception as e:
+                logger.debug("QR fetch %s: %s", path, e)
+        return None
+
+    async def _poll_instance_connect_qr(
+        self,
+        *,
+        max_attempts: int = 55,
+        delay_sec: float = 0.55,
+    ) -> Optional[str]:
+        """
+        Evolution API often returns only {\"count\": 0} until Baileys emits the QR.
+        Poll GET /instance/connect/{instance} until base64/code appears or attempts exhausted.
+        """
+        client = await self._get_client()
+        path = f"/instance/connect/{self.instance_name}"
+        last_obj: Any = None
+        for _ in range(max_attempts):
+            try:
+                response = await client.get(path)
+            except Exception as e:
+                self._qr_diag["connect_error"] = str(e)[:220]
+                return None
+            if response.status_code != 200:
+                self._qr_diag["connect_error"] = (
+                    f"connect HTTP {response.status_code}: {response.text[:220]}"
+                )
+                return None
+            try:
+                payload = response.json()
+            except Exception:
+                payload = None
+            last_obj = payload
+            if isinstance(payload, list) and payload:
+                payload = payload[0]
+            if isinstance(payload, dict) and payload.get("pairingCode"):
+                self._last_pairing_code = str(payload["pairingCode"])
+            raw = self._extract_qr_from_payload(payload)
+            if raw:
+                img = self._normalize_image_string(str(raw))
+                if img:
+                    return img
+                s = str(raw).strip()
+                if len(s) > 60:
+                    return self._normalize_image_string(s) or s
+            await asyncio.sleep(delay_sec)
+
+        if isinstance(last_obj, dict):
+            if (
+                last_obj.get("count") == 0
+                and not last_obj.get("base64")
+                and not last_obj.get("code")
+                and not last_obj.get("qrOrCode")
+            ):
+                self._qr_diag["error"] = (
+                    "Evolution returned empty QR (count=0). Update CONFIG_SESSION_PHONE_VERSION in "
+                    "docker-compose.yml (value from WhatsApp Web → Menu → Help), run "
+                    "`docker compose up -d --force-recreate evolution-api`, then "
+                    "`bash scripts/reset_evolution_whatsapp_instance.sh`, and Connect again."
+                )
+        return None
+
+    async def ensure_whatsapp_instance(self) -> bool:
+        """
+        Evolution API v2 requires an instance before connect/qrCode works.
+        POST /instance/create when connectionState returns 404.
+        """
+        self._qr_diag.pop("error", None)
+        if not self.base_url:
+            self._qr_diag["error"] = "EVOLUTION_URL is not set in backend .env"
+            return False
+        if not self.api_key:
+            self._qr_diag["error"] = "EVOLUTION_API_KEY is not set in backend .env"
+            return False
+        try:
+            client = await self._get_client()
+            r = await client.get(f"/instance/connectionState/{self.instance_name}")
+            self._qr_diag["connectionState_http"] = r.status_code
+            if r.status_code == 200:
+                return True
+            if r.status_code == 401:
+                self._qr_diag["error"] = "Evolution API returned 401 — verify EVOLUTION_API_KEY"
+                return False
+            if r.status_code == 404:
+                cr = await client.post(
+                    "/instance/create",
+                    json={
+                        "instanceName": self.instance_name,
+                        "integration": "WHATSAPP-BAILEYS",
+                        "qrcode": True,
+                    },
+                )
+                self._qr_diag["create_http"] = cr.status_code
+                if cr.status_code in (200, 201):
+                    return True
+                low = cr.text.lower()
+                if cr.status_code == 403 and ("already" in low or "in use" in low):
+                    return True
+                self._qr_diag["create_error"] = cr.text[:800]
+                logger.warning(
+                    "Evolution create instance failed: %s %s",
+                    cr.status_code,
+                    cr.text[:300],
+                )
+                return False
+            self._qr_diag["connectionState_error"] = r.text[:400]
+            return False
+        except Exception as e:
+            self._qr_diag["error"] = f"Evolution unreachable ({self.base_url}): {e}"
+            logger.warning("ensure_whatsapp_instance: %s", e)
+            return False
+
+    async def poll_live_qr(self) -> Optional[str]:
+        """
+        Load QR for pairing when connectionState omits it (common on Evolution v2).
+
+        Order: ensure instance -> qrCode endpoints -> poll GET /instance/connect (Baileys emits QR asynchronously).
+        """
+        self._last_pairing_code = None
+        try:
+            await self.ensure_whatsapp_instance()
+
+            img = await self._fetch_qr_image_multi()
+            if img:
+                return img
+
+            client = await self._get_client()
+            snap = await client.get(f"/instance/connect/{self.instance_name}")
+            if snap.status_code == 200:
+                try:
+                    payload = snap.json()
+                except Exception:
+                    payload = {}
+                if isinstance(payload, list) and payload:
+                    payload = payload[0]
+                if isinstance(payload, dict) and payload.get("pairingCode"):
+                    self._last_pairing_code = str(payload["pairingCode"])
+                raw = self._extract_qr_from_payload(payload)
+                if raw:
+                    img = self._normalize_image_string(str(raw)) or str(raw)
+                    if img:
+                        return img
+
+            img = await self._fetch_qr_image_multi()
+            if img:
+                return img
+
+            logger.debug("poll_live_qr: no QR for instance=%s", self.instance_name)
+            return None
+        except Exception as e:
+            self._qr_diag["error"] = str(e)
+            logger.warning("poll_live_qr failed for %s: %s", self.instance_name, e)
+            return None
+
     async def get_connection_status(self) -> dict:
         """Get WhatsApp connection status"""
         try:
@@ -64,13 +332,22 @@ class EvolutionClient:
 
             if response.status_code == 200:
                 data = response.json()
-                state = data.get("state", "DISCONNECTED")
+                state = self._extract_instance_state(data)
+                qr_raw = (
+                    data.get("qrCode")
+                    or data.get("qrcode")
+                    or (
+                        data.get("instance", {}).get("qrCode")
+                        if isinstance(data.get("instance"), dict)
+                        else None
+                    )
+                )
 
                 return {
-                    "connected": state == "CONNECTED",
+                    "connected": self._state_connected(state),
                     "status": state,
-                    "qr_code": data.get("qrCode"),
-                    "message": self._get_status_message(state)
+                    "qr_code": qr_raw,
+                    "message": self._get_status_message(state),
                 }
             return {"connected": False, "status": "ERROR", "message": "Failed to get status"}
         except Exception as e:
@@ -79,22 +356,25 @@ class EvolutionClient:
 
     def _get_status_message(self, state: str) -> str:
         """Get human-readable status message"""
+        key = (state or "").strip().upper()
         messages = {
             "CONNECTED": "WhatsApp is connected and ready",
+            "OPEN": "WhatsApp is connected and ready",
             "DISCONNECTED": "WhatsApp is disconnected",
+            "CLOSE": "WhatsApp is disconnected",
+            "CLOSED": "WhatsApp is disconnected",
             "CONNECTING": "WhatsApp is connecting...",
             "DISCONNECTING": "WhatsApp is disconnecting...",
             "QRCODE": "Waiting for QR scan",
-            "DISCONNECTED_BY_OWNER": "Disconnected by owner"
+            "DISCONNECTED_BY_OWNER": "Disconnected by owner",
         }
-        return messages.get(state, f"Status: {state}")
+        return messages.get(key, f"Status: {state}")
 
     async def generate_qr_code(self) -> dict:
-        """Generate QR code for WhatsApp pairing"""
+        """Generate QR code for WhatsApp pairing (Evolution v2 + legacy v1)."""
         try:
-            client = await self._get_client()
+            await self.ensure_whatsapp_instance()
 
-            # First check current status
             status = await self.get_connection_status()
 
             if status.get("connected"):
@@ -102,37 +382,40 @@ class EvolutionClient:
                     "success": True,
                     "qr_code": None,
                     "already_connected": True,
-                    "message": "WhatsApp is already connected"
+                    "message": "WhatsApp is already connected",
                 }
 
-            # Check if QR is already available
             if status.get("qr_code"):
                 return {
                     "success": True,
                     "qr_code": status["qr_code"],
-                    "message": "QR code available"
+                    "message": "QR code available",
                 }
 
-            # Request new QR code
-            response = await client.post(
-                "/instance/connect",
-                json={"instanceName": self.instance_name}
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                qr_code = data.get("qrCode", {})
-
+            img = await self.get_qr_code_image()
+            if img:
                 return {
                     "success": True,
-                    "qr_code": qr_code,
-                    "message": "QR code generated"
+                    "qr_code": img,
+                    "pairing_code": self.get_pairing_code(),
+                    "message": "QR code generated",
                 }
 
+            img = await self._poll_instance_connect_qr()
+            if img:
+                return {
+                    "success": True,
+                    "qr_code": img,
+                    "pairing_code": self.get_pairing_code(),
+                    "message": "QR code generated",
+                }
+
+            hint = self.evolution_user_hint()
             return {
                 "success": False,
-                "error": f"Failed to generate QR: {response.status_code}",
-                "details": response.text
+                "error": "No QR payload from Evolution API",
+                "details": hint or "Timed out waiting for QR from Evolution",
+                "pairing_code": self.get_pairing_code(),
             }
 
         except Exception as e:
@@ -140,17 +423,11 @@ class EvolutionClient:
             return {"success": False, "error": str(e)}
 
     async def get_qr_code_image(self) -> Optional[str]:
-        """Get QR code as base64 image"""
+        """Get QR code as base64 image (PNG) from Evolution."""
         try:
-            client = await self._get_client()
-            response = await client.get(f"/instance/qrCode/{self.instance_name}")
-
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("qrcode")
-            return None
+            return await self._fetch_qr_image_multi()
         except Exception as e:
-            logger.error(f"Failed to get QR image: {e}")
+            logger.error("Failed to get QR image: %s", e)
             return None
 
     async def logout(self) -> dict:

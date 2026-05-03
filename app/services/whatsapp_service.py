@@ -1,5 +1,6 @@
 """WhatsApp Service - Manages WhatsApp sessions and messages"""
 
+import hashlib
 from datetime import datetime, timezone
 from uuid import uuid4
 from typing import Optional
@@ -21,18 +22,30 @@ class WhatsAppService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    def _get_tenant_instance_name(self, tenant_id: str) -> str:
+        """Generate a tenant-specific Evolution instance name for session isolation.
+
+        Uses a hash of tenant_id to create a unique but stable instance name,
+        avoiding any tenant-specific data in the instance name itself.
+        Format: {base_prefix}-{8char_hash}
+        """
+        hash_suffix = hashlib.md5(tenant_id.encode()).hexdigest()[:8]
+        return f"inika-{hash_suffix}"
+
     async def get_or_create_session(self, tenant_id: str) -> WhatsAppSession:
-        """Get existing session or create a new one for tenant"""
+        """Get existing session or create a new one for tenant with tenant-specific instance name."""
         result = await self.db.execute(
             select(WhatsAppSession).where(WhatsAppSession.tenant_id == tenant_id)
         )
         session = result.scalar_one_or_none()
 
         if not session:
+            instance_name = self._get_tenant_instance_name(tenant_id)
             session = WhatsAppSession(
                 id=str(uuid4()),
                 tenant_id=tenant_id,
                 status=SessionStatus.DISCONNECTED.value,
+                evolution_instance_name=instance_name,
             )
             self.db.add(session)
             await self.db.commit()
@@ -120,11 +133,13 @@ class WhatsAppService:
         return WhatsAppStatusResponse(
             is_connected=session.status == SessionStatus.CONNECTED.value,
             status=session.status,
+            qrcode=session.qr_code,
             phone_number=session.phone_number,
             display_name=session.display_name,
             connected_at=session.connected_at,
             last_activity=session.last_activity,
             message_count=message_count,
+            local_session_id=session.id,
         )
 
     async def get_qr_code(self, tenant_id: str) -> Optional[QRCodeResponse]:
@@ -177,7 +192,8 @@ class WhatsAppService:
         tenant_id: str,
         page: int = 1,
         page_size: int = 50,
-        direction: Optional[str] = None
+        direction: Optional[str] = None,
+        order: str = "desc",
     ) -> tuple[list[WhatsAppMessage], int]:
         """Get messages for tenant with pagination"""
         # Build base query
@@ -194,7 +210,12 @@ class WhatsAppService:
 
         # Get paginated messages
         offset = (page - 1) * page_size
-        query = query.order_by(WhatsAppMessage.created_at.desc()).offset(offset).limit(page_size)
+        ord_col = (
+            WhatsAppMessage.created_at.asc()
+            if order == "asc"
+            else WhatsAppMessage.created_at.desc()
+        )
+        query = query.order_by(ord_col).offset(offset).limit(page_size)
         result = await self.db.execute(query)
         messages = list(result.scalars().all())
 
