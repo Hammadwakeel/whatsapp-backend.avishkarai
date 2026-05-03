@@ -5,7 +5,7 @@
 - **Database**: PostgreSQL with SQLAlchemy (async)
 - **Auth**: JWT with access/refresh tokens (tenant-based)
 - **LLM**: OpenRouter (Claude) integration
-- **WhatsApp**: Evolution API (free, open-source)
+- **WhatsApp**: Baileys Gateway (local Node.js)
 - **Migration**: Alembic
 - **Testing**: pytest + pytest-asyncio
 
@@ -23,20 +23,19 @@ inika-backend/
 │   ├── core/          # Config, security, database
 │   ├── models/        # SQLAlchemy models (tenant, wiki, journey)
 │   ├── schemas/      # Pydantic schemas
-│   ├── services/     # Business logic (tenant, wiki, LLM, evolution, booking, journey)
+│   ├── services/     # Business logic (tenant, wiki, LLM, baileys, booking, journey)
 │   └── main.py       # FastAPI app entry
 ├── alembic/          # Database migrations
 ├── docs/             # Documentation
 │   ├── API.md        # Auth API reference
 │   ├── INTEGRATION.md # Frontend integration
 │   ├── WIKI.md       # Wiki system docs
-│   ├── WHATSAPP.md   # WhatsApp/Evolution API docs
+│   ├── WHATSAPP.md   # WhatsApp integration docs
 │   ├── BOOKING.md    # Booking system docs
 │   ├── WEBHOOK.md    # Webhook integration docs
 │   └── JOURNEY.md    # Journey module docs
 ├── wiki/             # Wiki markdown files
 ├── tests/            # Unit & integration tests
-├── docker-compose.evolution.yml  # Evolution API setup
 ├── skills.md         # Claude Code skills
 ├── .env.example
 ├── docker-compose.yml
@@ -64,9 +63,8 @@ inika-backend/
 | LLM_MODEL | No | Default: anthropic/claude-3-haiku |
 | ACCESS_TOKEN_EXPIRE_MINUTES | No | Token expiry (default: 30) |
 | REFRESH_TOKEN_EXPIRE_DAYS | No | Refresh expiry (default: 7) |
-| EVOLUTION_URL | No | Evolution API URL (default: http://localhost:8080) |
-| EVOLUTION_API_KEY | No | Evolution API authentication key |
-| EVOLUTION_INSTANCE_NAME | No | Instance name for WhatsApp (default: inika) |
+| BAILEYS_GATEWAY_URL | No | Baileys Gateway URL (default: http://localhost:3002) |
+| BAILEYS_GATEWAY_API_KEY | No | Baileys Gateway API key (optional) |
 | INIKA_API_KEY | No | External booking system API key |
 | INIKA_BOOKING_KEY | No | External booking system access key |
 | OPENWEATHER_API_KEY | No | OpenWeatherMap API key for weather data |
@@ -91,8 +89,8 @@ inika-backend/
 - **Search**: Full-text search across pages
 - **Cross-references**: `[[Wiki Links]]` between pages
 
-### WhatsApp Integration (Evolution API)
-- Free, open-source WhatsApp gateway
+### WhatsApp Integration (Baileys Gateway)
+- Local Node.js multi-tenant WhatsApp gateway
 - QR code generation via API
 - Webhook support for incoming messages
 - Message history and session management
@@ -153,8 +151,8 @@ docker-compose up
 # Migrations
 alembic upgrade head
 
-# Start Evolution API (WhatsApp gateway)
-docker-compose up -d
+# Start Baileys Gateway
+cd scripts/whatsapp-gateway && npm install && npm start
 ```
 
 ## Key Dependencies
@@ -162,7 +160,7 @@ docker-compose up -d
 - sqlalchemy[asyncio], asyncpg - Async DB
 - python-jose - JWT tokens
 - passlib[bcrypt] - Password hashing
-- httpx - HTTP client (for OpenRouter/Tavily/Evolution)
+- httpx - HTTP client (for OpenRouter/Tavily/Baileys)
 - pydantic, pydantic-settings - Validation
 - qrcode[pil] - QR code generation
 

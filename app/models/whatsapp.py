@@ -47,8 +47,8 @@ class WhatsAppSession(Base):
     connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_activity: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Per-tenant Evolution instance name for WhatsApp session isolation
-    evolution_instance_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Per-tenant session name for WhatsApp gateway
+    gateway_session_name: Mapped[Optional[str]] = mapped_column(String(255), name="evolution_instance_name", nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
 

@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import os
+import hashlib
 from typing import Any
 from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.evolution_client import evolution_client
+from app.services.baileys_client import BaileysGatewayClient
 from app.models.journey import JourneyMessageLog, JourneyConversation, JourneyMessage
 
 
 class JourneyMessageSender:
-    """Send journey messages via WhatsApp Evolution API."""
+    """Send journey messages via WhatsApp Baileys Gateway."""
 
     def __init__(self, db: AsyncSession = None):
         self.db = db
@@ -53,11 +53,12 @@ class JourneyMessageSender:
         phone = self._format_phone(guest_mobile)
 
         try:
-            # Send via Evolution API
-            result = await evolution_client.send_message(
-                phone=phone,
-                message=message
-            )
+            # Send via Baileys Gateway
+            hash_suffix = hashlib.md5(tenant_id.encode()).hexdigest()[:8]
+            session_name = f"inika-{hash_suffix}"
+            client = BaileysGatewayClient(session_name=session_name)
+            result = await client.send_message(phone=phone, message=message)
+            await client.close()
 
             if result.get("success"):
                 # Log the message
@@ -84,7 +85,7 @@ class JourneyMessageSender:
 
                 return {
                     "status": "ok",
-                    "message_id": result.get("messageId"),
+                    "message_id": result.get("message_id"),
                     "sent_to": phone,
                     "message_type": message_type,
                 }

@@ -117,8 +117,8 @@ async def handler(
 | TAVILY_API_KEY | Yes | SHARED across all tenants - Web search |
 | LLM_MODEL | No | Default: anthropic/claude-3-haiku |
 | WIKI_PATH | No | Default: wiki |
-| EVOLUTION_URL | No | Evolution API URL (WhatsApp gateway) |
-| EVOLUTION_API_KEY | No | Evolution API authentication |
+| BAILEYS_GATEWAY_URL | No | Baileys Gateway URL (default: http://localhost:3002) |
+| BAILEYS_GATEWAY_API_KEY | No | Baileys Gateway API key (optional) |
 | INIKA_API_KEY | No | External booking API key |
 | INIKA_BOOKING_KEY | No | External booking access key |
 | OPENWEATHER_API_KEY | No | OpenWeatherMap API key for weather |
@@ -163,7 +163,7 @@ async def handler(
 | `app/api/` | Route handlers (auth, wiki, whatsapp, booking, journey) |
 | `app/core/` | Config, database, security |
 | `app/models/` | SQLAlchemy models (tenant, user, wiki, journey) |
-| `app/services/` | Business logic (tenant, wiki, LLM, evolution, booking, journey) |
+| `app/services/` | Business logic (tenant, wiki, LLM, baileys, booking, journey) |
 | `app/api/booking.py` | Booking/external API integration |
 | `app/api/journey.py` | Journey/guest messaging endpoints |
 | `app/services/journey/` | Journey module services (weather, messaging, scheduling) |
@@ -248,7 +248,7 @@ Repository: https://github.com/Hammadwakeel/whatsapp-backend.avishkarai.git
    - AgentConfig model for system/personality prompts
 
 4. **Phase 4: WhatsApp Integration** ✓ (Complete)
-   - Evolution API integration for WhatsApp gateway
+   - Baileys Gateway integration for WhatsApp
 
 5. **Phase 5: Journey Module** ✓ (Complete)
    - AI-powered guest messaging (weather, time, status)

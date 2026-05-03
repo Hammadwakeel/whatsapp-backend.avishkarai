@@ -6,44 +6,31 @@ import dotenv from 'dotenv';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import qrcode from 'qrcode';
 import axios from 'axios';
-import { Boom } from '@hapi/boom';
-import {
-  useMultiFileAuthState,
-  makeCacheableSignalKeyStore,
-  makeWASocket,
-  Browsers,
-  DisconnectReason,
-  getContentType,
-} from '@whiskeysockets/baileys';
+import { create } from '@open-wa/wa-automate';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Create proper logger with debug level for Baileys
 const logger = pino({
   level: 'debug',
   transport: {
     target: 'pino-pretty',
-    options: {
-      colorize: true,
-    },
+    options: { colorize: true },
   },
 }).default ?? pino();
 
 logger.info('Starting Inika WhatsApp Gateway...');
 
-// Load environment variables
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Store for sockets separately (can't be stored in JSON-serializable cache)
-const sockets = new Map();
+// Store for OpenWA clients per tenant
+const clients = new Map();
 
-// Store for serializable session state (QR code, connection status, etc)
+// Store for session state (connection status, phone number, etc)
 const sessionStates = new Map();
 
 const SESSIONS_DIR = process.env.SESSIONS_DIR || './sessions';
@@ -51,7 +38,6 @@ const WEBHOOK_URL = process.env.WEBHOOK_URL || 'http://localhost:8000/webhook/wh
 const PORT = process.env.PORT || 3002;
 const API_KEY = process.env.API_KEY || '';
 
-// Ensure sessions directory exists
 fs.ensureDirSync(SESSIONS_DIR);
 
 // API Key middleware
@@ -90,27 +76,34 @@ app.get('/api/sessions', apiKeyAuth, (req, res) => {
 app.get('/api/sessions/:name', apiKeyAuth, async (req, res) => {
   const { name } = req.params;
   const state = sessionStates.get(name);
+  const client = clients.get(name);
 
   if (!state) {
-    // Check if auth files exist
-    const sessionPath = path.join(SESSIONS_DIR, name);
-    if (await fs.pathExists(sessionPath)) {
-      return res.json({
-        name,
-        status: 'DISCONNECTED',
-        number: null,
-        pushName: null,
-      });
-    }
     return res.status(404).json({ error: 'Session not found' });
+  }
+
+  // Try to get latest session info from client
+  let phoneNumber = state.phoneNumber;
+  let pushName = state.pushName;
+  let connected = state.connected;
+
+  try {
+    if (client && state.connected) {
+      const info = await client.getHostDevice();
+      if (info) {
+        phoneNumber = info.wid;
+        pushName = info.pushname;
+      }
+    }
+  } catch (e) {
+    // Client might be disconnected
   }
 
   res.json({
     name,
-    status: state.connected ? 'CONNECTED' : 'CONNECTING',
-    number: state.phoneNumber || null,
-    pushName: state.pushName || null,
-    imgUrl: state.qr || null,
+    status: connected ? 'CONNECTED' : 'DISCONNECTED',
+    number: phoneNumber,
+    pushName,
   });
 });
 
@@ -128,17 +121,13 @@ app.get('/api/sessions/:name/qr', apiKeyAuth, async (req, res) => {
   }
 
   if (state.qr) {
-    const qrData = [{
-      code: state.qr.split(',')[1] || state.qr,
-      base64: state.qr,
-    }];
-    return res.status(200).json({ qr: qrData });
+    return res.status(200).json({ qr: [{ code: state.qr, base64: state.qr }] });
   }
 
   res.status(200).json({ qr: [], message: 'No QR code available' });
 });
 
-// Create session
+// Create/start session
 app.post('/api/sessions', apiKeyAuth, async (req, res) => {
   const { name, config, force } = req.body;
 
@@ -146,27 +135,6 @@ app.post('/api/sessions', apiKeyAuth, async (req, res) => {
     return res.status(400).json({ error: 'Session name is required' });
   }
 
-  // If force=true, delete existing session first
-  if (force) {
-    const existingSocket = sockets.get(name);
-    if (existingSocket) {
-      try {
-        await existingSocket.logout();
-      } catch (e) {}
-      sockets.delete(name);
-    }
-    const sessionPath = path.join(SESSIONS_DIR, name);
-    await fs.remove(sessionPath).catch(() => {});
-    sessionStates.delete(name);
-    logger.info({ tenantId: name }, 'Existing session forcefully deleted');
-  }
-
-  const existingSocket = sockets.get(name);
-  if (existingSocket) {
-    return res.status(409).json({ error: 'Session already exists' });
-  }
-
-  // Initialize session
   try {
     await connectToWhatsApp(name, config?.webhookUrl);
     res.status(201).json({ name, status: 'created' });
@@ -176,33 +144,21 @@ app.post('/api/sessions', apiKeyAuth, async (req, res) => {
   }
 });
 
-// Start session
-app.post('/api/sessions/:name/start', apiKeyAuth, async (req, res) => {
-  const { name } = req.params;
-  try {
-    await connectToWhatsApp(name);
-    res.status(200).json({ name, status: 'started' });
-  } catch (error) {
-    logger.error({ err: error, tenantId: name }, 'Failed to start session');
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete session (logout)
+// Delete/logout session
 app.delete('/api/sessions/:name', apiKeyAuth, async (req, res) => {
   const { name } = req.params;
-  const sock = sockets.get(name);
+  const client = clients.get(name);
 
-  if (sock) {
+  if (client) {
     try {
-      await sock.logout();
+      await client.logout();
     } catch (e) {
       logger.warn({ err: e, tenantId: name }, 'Logout error');
     }
-    sockets.delete(name);
+    clients.delete(name);
   }
 
-  // Delete auth files
+  // Delete session files
   const sessionPath = path.join(SESSIONS_DIR, name);
   await fs.remove(sessionPath).catch(() => {});
 
@@ -219,18 +175,16 @@ app.post('/api/messages/sendText', apiKeyAuth, async (req, res) => {
     return res.status(400).json({ error: 'session, chatId, and text are required' });
   }
 
-  const sock = sockets.get(session);
-  if (!sock) {
+  const client = clients.get(session);
+  if (!client) {
     return res.status(400).json({ error: 'Session not connected' });
   }
 
   try {
-    const jid = chatId.includes('@') ? chatId : `${chatId}@s.whatsapp.net`;
-    const message = await sock.sendMessage(jid, { text });
-
-    logger.info({ jid, tenantId: session }, 'Message sent');
+    const message = await client.sendText(chatId, text);
+    logger.info({ chatId, tenantId: session }, 'Message sent');
     res.json({
-      key: { id: message.key.id, remoteJid: jid },
+      key: { id: message.id, remoteJid: chatId },
       message: { text },
     });
   } catch (error) {
@@ -239,262 +193,125 @@ app.post('/api/messages/sendText', apiKeyAuth, async (req, res) => {
   }
 });
 
-/**
- * Connect to WhatsApp using official Baileys patterns
- */
+// Connect to WhatsApp using OpenWA
 async function connectToWhatsApp(tenantId, webhookUrl) {
   const sessionPath = path.join(SESSIONS_DIR, tenantId);
   await fs.ensureDir(sessionPath);
 
   // Initialize session state
-  const sessionState = {
+  const state = {
     qr: null,
     connected: false,
     phoneNumber: null,
     pushName: null,
     webhookUrl: webhookUrl || WEBHOOK_URL,
-    reconnectAttempts: 0,
-    maxReconnectAttempts: 3,
   };
-  sessionStates.set(tenantId, sessionState);
+  sessionStates.set(tenantId, state);
 
-  // Use official useMultiFileAuthState pattern - generates keys automatically
-  let { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-
-  // Check if credentials are valid
-  const credsPath = path.join(sessionPath, 'creds.json');
-  const hasValidCreds = await fs.pathExists(credsPath);
-
-  if (hasValidCreds) {
-    try {
-      const creds = JSON.parse(await fs.readFile(credsPath, 'utf-8'));
-      if (creds.me && creds.me.id) {
-        logger.info({ tenantId }, 'Valid credentials found - will try to resume session');
-      } else {
-        logger.info({ tenantId }, 'Invalid credentials - removing for fresh login');
-        await fs.remove(sessionPath);
-        await fs.ensureDir(sessionPath);
-        // Re-initialize auth state after cleanup
-        const result = await useMultiFileAuthState(sessionPath);
-        state = result.state;
-        saveCreds = result.saveCreds;
-      }
-    } catch (e) {
-      logger.info({ tenantId }, 'Error reading credentials - forcing fresh login');
-      await fs.remove(sessionPath);
-      await fs.ensureDir(sessionPath);
-      const result = await useMultiFileAuthState(sessionPath);
-      state = result.state;
-      saveCreds = result.saveCreds;
-    }
+  // Check if already connected
+  const existingClient = clients.get(tenantId);
+  if (existingClient) {
+    logger.info({ tenantId }, 'Client already exists');
+    return state;
   }
 
-  logger.info({ tenantId, hasMe: !!state.creds?.me }, 'Auth state ready');
+  logger.info({ tenantId }, 'Creating OpenWA client...');
 
-  // Create socket with auth
-  const sock = makeWASocket({
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-    logger: logger,
-    browser: Browsers.ubuntu('Inika WhatsApp Gateway'),
-    printQRInTerminal: false,
-    qrTimeout: 120000,
-    connectTimeoutMs: 60000,
-  });
+  const client = await create({
+    sessionId: tenantId,
+    headless: true,
+    multiDevice: true,
+    sessionStoragePath: SESSIONS_DIR,
+    qrTimeoutMs: 120000,
+    authTimeoutMs: 60000,
+    throwErrorOnTosBlock: false,
+    customUserAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    onMessage: async (message) => {
+      if (message.fromMe) return;
 
-  // Store socket
-  sockets.set(tenantId, sock);
+      const remoteJid = message.from || message.chatId;
+      if (!remoteJid || remoteJid === 'status@broadcast') return;
 
-  // Store socket reference in session state for reconnect logic
-  sessionState.socket = sock;
-
-  // Listen to raw WebSocket messages to capture QR before it's lost
-  if (sock.ws && sock.ws.on) {
-    sock.ws.on('message', (data) => {
-      try {
-        const msg = data.toString();
-        // Look for pair-device message which contains QR refs
-        if (msg.includes('pair-device') && msg.includes('ref')) {
-          logger.info({ tenantId, msg: msg.substring(0, 200) }, 'Raw pair-device message detected');
-        }
-      } catch (e) {
-        // Ignore parsing errors
-      }
-    });
-  }
-
-  // Listen to creds events to catch QR generation
-  sock.ev.on('creds.update', async (creds) => {
-    logger.debug({ tenantId, hasMe: !!creds?.me }, 'Credentials updated');
-    try {
-      await fs.writeJson(path.join(sessionPath, 'creds.json'), creds, { spaces: 2 });
-    } catch (e) {
-      logger.error({ err: e, tenantId }, 'Failed to save credentials');
-    }
-  });
-
-  /**
-   * Connection update handler
-   */
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr: qrData, phoneNumber, pushName } = update;
-
-    logger.debug({ tenantId, connection, hasQR: !!qrData, qrData }, 'Connection update received');
-
-    // Handle QR code generation
-    if (qrData) {
-      try {
-        const qrImage = await qrcode.toDataURL(qrData);
-        sessionState.qr = qrImage;
-        logger.info({ tenantId, qrLength: qrImage.length }, 'QR code generated - scan with WhatsApp');
-      } catch (e) {
-        logger.error({ err: e, tenantId }, 'QR generation error');
-      }
-    }
-
-    // Handle connection state changes
-    switch (connection) {
-      case 'connecting':
-        logger.info({ tenantId }, 'Connecting to WhatsApp...');
-        break;
-      case 'open':
-        sessionState.connected = true;
-        sessionState.qr = null;
-        sessionState.phoneNumber = phoneNumber || sock.user?.id?.split('@')[0];
-        sessionState.pushName = pushName || sock.user?.name || 'Inika Bot';
-        logger.info({ tenantId, phoneNumber: sessionState.phoneNumber, pushName: sessionState.pushName }, 'WhatsApp connected successfully');
-        break;
-      case 'close':
-        const statusCode = lastDisconnect?.error?.output?.statusCode;
-        const reason = lastDisconnect?.error?.message;
-
-        logger.warn({ tenantId, statusCode, reason }, 'Connection closed');
-
-        sessionState.connected = false;
-        sessionState.reconnectAttempts++;
-
-        // Only reconnect for specific transient errors
-        // Don't reconnect for auth failures (401, 405) - user needs to re-scan QR
-        const isAuthFailure = statusCode === DisconnectReason.loggedOut || statusCode === 405;
-        const isTransientError = statusCode === DisconnectReason.connectionClosed ||
-                                statusCode === DisconnectReason.timedOut ||
-                                statusCode === undefined;
-
-        if (isAuthFailure) {
-          logger.info({ tenantId }, 'Authentication failed - delete session and re-scan QR to reconnect');
-          sessionState.qr = null; // Clear any stale QR
-        } else if (isTransientError && sessionState.reconnectAttempts < sessionState.maxReconnectAttempts) {
-          logger.info({ tenantId, attempt: sessionState.reconnectAttempts }, 'Transient error - retrying...');
-          setTimeout(async () => {
-            try {
-              await connectToWhatsApp(tenantId, sessionState.webhookUrl);
-            } catch (error) {
-              logger.error({ err: error, tenantId }, 'Reconnection failed');
-            }
-          }, 3000);
-        } else if (sessionState.reconnectAttempts >= sessionState.maxReconnectAttempts) {
-          logger.warn({ tenantId }, 'Max reconnection attempts reached - giving up');
-        }
-        break;
-    }
-  });
-
-  /**
-   * Handle incoming messages
-   */
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    logger.debug({ tenantId, type, count: messages.length }, 'Messages upsert');
-
-    for (const msg of messages) {
-      // Skip messages we sent
-      if (msg.key.fromMe) continue;
-
-      const remoteJid = msg.key.remoteJid;
-      if (!remoteJid || remoteJid === 'status@broadcast') continue;
-
-      // Extract message content
-      const messageContent = msg.message;
-      if (!messageContent) continue;
-
-      const messageType = getContentType(messageContent);
-      const text = messageContent?.conversation ||
-                   messageContent?.extendedTextMessage?.text ||
-                   '';
-
-      // Extract phone number
-      const phone = remoteJid.split('@')[0];
+      const text = message.body || '';
+      const messageType = message.type || 'chat';
 
       logger.info({
         tenantId,
-        phone,
+        from: message.from,
         messageType,
         hasText: !!text,
       }, 'Incoming message');
 
-      // Build webhook payload
-      const webhookPayload = {
-        event: 'onMessage',
-        session: tenantId,
-        data: {
-          key: msg.key,
-          message: messageContent,
-          pushName: msg.pushName || sessionState.pushName,
-          messageType,
-          text,
-        },
-      };
-
-      // Send to webhook
       try {
-        const fullWebhookUrl = `${sessionState.webhookUrl}${sessionState.webhookUrl.includes('?') ? '&' : '?'}tenant_id=${tenantId}`;
-        await axios.post(fullWebhookUrl, webhookPayload, {
-          timeout: 10000,
-        });
-        logger.debug({ phone }, 'Webhook sent successfully');
+        const fullWebhookUrl = `${state.webhookUrl}${state.webhookUrl.includes('?') ? '&' : '?'}tenant_id=${tenantId}`;
+        await axios.post(fullWebhookUrl, {
+          event: 'onMessage',
+          session: tenantId,
+          data: {
+            key: { id: message.id, remoteJid },
+            message: message,
+            pushName: message.pushName || state.pushName,
+            messageType,
+            text,
+          },
+        }, { timeout: 10000 });
+        logger.debug({ remoteJid, tenantId }, 'Webhook sent');
       } catch (e) {
-        logger.error({ err: e, phone, tenantId }, 'Webhook error');
+        logger.error({ err: e, tenantId }, 'Webhook error');
       }
-    }
-  });
+    },
+    onStateChange: async (stateChange) => {
+      logger.info({ tenantId, state: stateChange }, 'State changed');
 
-  /**
-   * Handle groups updates
-   */
-  sock.ev.on('groups.update', async (events) => {
-    for (const event of events) {
-      logger.debug({ tenantId, event }, 'Group update');
-    }
-  });
+      if (stateChange === 'CONNECTED') {
+        state.connected = true;
+        state.qr = null;
+        try {
+          const info = await client.getHostDevice();
+          if (info) {
+            state.phoneNumber = info.wid;
+            state.pushName = info.pushname;
+          }
+        } catch (e) {}
 
-  /**
-   * Handle chat updates
-   */
-  sock.ev.on('messages.update', async ({ updates }) => {
-    for (const update of updates) {
-      if (update.pollUpdates) {
-        logger.debug({ tenantId, update }, 'Poll update received');
+        logger.info({ tenantId, phoneNumber: state.phoneNumber }, 'WhatsApp connected successfully');
+      } else if (stateChange === 'DISCONNECTED' || stateChange === 'LOGGED_OUT') {
+        state.connected = false;
+        logger.warn({ tenantId }, 'WhatsApp disconnected');
       }
+    },
+    onSessionToken: async (token) => {
+      logger.debug({ tenantId }, 'Session token updated');
+    },
+    onQR: (qr) => {
+      logger.info({ tenantId }, 'QR code received');
+      state.qr = qr;
+      // Print QR in terminal
+      try {
+        const qrcodeTerminal = require('qrcode-terminal');
+        qrcodeTerminal.generate(qr, { small: true });
+      } catch (e) {
+        logger.warn({ tenantId }, 'qrcode-terminal not available');
+      }
+    },
+  });
+
+  clients.set(tenantId, client);
+
+  // Check if already authenticated
+  try {
+    const info = await client.getHostDevice();
+    if (info && info.wid) {
+      state.connected = true;
+      state.phoneNumber = info.wid;
+      state.pushName = info.pushname;
+      logger.info({ tenantId, phoneNumber: state.phoneNumber }, 'Session already authenticated');
     }
-  });
+  } catch (e) {
+    logger.info({ tenantId }, 'Not authenticated yet, waiting for QR scan');
+  }
 
-  /**
-   * Handle new chats
-   */
-  sock.ev.on('chats.upsert', async ({ chats }) => {
-    logger.debug({ tenantId, count: chats.length }, 'Chats upsert');
-  });
-
-  /**
-   * Handle new contacts
-   */
-  sock.ev.on('contacts.upsert', async ({ contacts }) => {
-    logger.debug({ tenantId, count: contacts.length }, 'Contacts upsert');
-  });
-
-  // No need to wait - connection updates will be handled via the event listener
-  return sessionState;
+  return state;
 }
 
 // Start server
@@ -504,30 +321,27 @@ server.listen(PORT, () => {
     port: PORT,
     sessionsDir: SESSIONS_DIR,
     webhookUrl: WEBHOOK_URL,
-  }, 'Inika WhatsApp Gateway started');
+  }, 'Inika WhatsApp Gateway started (OpenWA)');
 });
 
 // Graceful shutdown
 const shutdown = async (signal) => {
   logger.info({ signal }, 'Shutting down...');
 
-  // Close all WhatsApp sessions
-  for (const [tenantId, sock] of sockets.entries()) {
+  for (const [tenantId, client] of clients.entries()) {
     try {
-      await sock.logout();
-      logger.info({ tenantId }, 'Session logged out');
+      await client.kill();
+      logger.info({ tenantId }, 'Client killed');
     } catch (e) {
-      logger.warn({ err: e, tenantId }, 'Logout error during shutdown');
+      logger.warn({ err: e, tenantId }, 'Kill error');
     }
   }
 
-  // Close HTTP server
   server.close(() => {
     logger.info('Server closed');
     process.exit(0);
   });
 
-  // Force exit after timeout
   setTimeout(() => {
     logger.warn('Forced exit');
     process.exit(1);

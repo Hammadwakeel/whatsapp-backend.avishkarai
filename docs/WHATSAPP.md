@@ -1,65 +1,24 @@
 # WhatsApp Integration
 
-This document describes the WhatsApp integration using the Baileys Gateway, WAHA, or Evolution API.
+This document describes the WhatsApp integration using the Baileys Gateway.
 
 ## Overview
 
-The system integrates with WhatsApp through a gateway that handles:
-- QR code generation for linking your WhatsApp account
-- Receiving incoming messages via webhooks
-- Sending outbound messages
-- Connection status monitoring
+WhatsApp integration is handled by the Baileys Gateway — a local Node.js service that manages WhatsApp sessions per tenant.
 
-## Supported Gateways
+## Quick Start
 
-### 1. Baileys Gateway (Recommended for Development)
-
-A local Node.js gateway using the Baileys library. Simple to set up, runs on your machine.
-
-- **Location**: `scripts/whatsapp-gateway/`
-- **Features**: Fast setup, multi-tenant, runs locally
+### 1. Install and run the gateway
 
 ```bash
-# Install and run
 cd scripts/whatsapp-gateway
 npm install
 npm start
 ```
 
-### 2. WAHA (Production Ready)
+The gateway starts on port 3002.
 
-A Docker-based production-ready WhatsApp gateway.
-
-- **Repository**: https://github.com/devofmind/waha
-- **Documentation**: https://waha.tech/docs
-
-```bash
-# Start with Docker
-docker compose -f docker-compose.waha.yml up -d
-```
-
-### 3. Evolution API (Deprecated)
-
-Legacy option, no longer recommended.
-
-## Quick Start with Baileys Gateway
-
-### 1. Install dependencies
-
-```bash
-cd scripts/whatsapp-gateway
-npm install
-```
-
-### 2. Start the gateway
-
-```bash
-npm start
-```
-
-The gateway will start on port 3002 with QR codes printed to the terminal.
-
-### 3. Configure backend
+### 2. Configure the backend
 
 Add to your `.env`:
 
@@ -67,17 +26,17 @@ Add to your `.env`:
 BAILEYS_GATEWAY_URL=http://localhost:3002
 ```
 
-### 4. Link WhatsApp
+### 3. Link WhatsApp
 
 1. Open the WhatsApp page in your dashboard
 2. Click "Link with phone number"
-3. Scan the QR code (also shown in terminal)
+3. Scan the QR code (also shown in the gateway terminal)
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌───────────────┐     ┌──────────────────┐
-│  WhatsApp User  │────▶│  Baileys       │────▶│  Inika Backend   │
+│  WhatsApp User  │────▶│  Baileys      │────▶│  Inika Backend   │
 │                 │◀────│  Gateway       │◀────│                  │
 └─────────────────┘     └───────────────┘     └──────────────────┘
                               │                      │
@@ -88,10 +47,10 @@ BAILEYS_GATEWAY_URL=http://localhost:3002
 
 ## Per-Tenant Sessions
 
-Each hotel (tenant) gets their own WhatsApp session:
+Each hotel (tenant) gets its own WhatsApp session:
 - Session name: `inika-{first_8_chars_of_tenant_id_hash}`
-- Sessions are stored in `scripts/whatsapp-gateway/sessions/`
-- Messages are routed using the `tenant_id` query parameter
+- Sessions stored in `scripts/whatsapp-gateway/sessions/`
+- Messages routed via `tenant_id` query parameter
 
 ## Environment Variables
 
@@ -99,16 +58,6 @@ Each hotel (tenant) gets their own WhatsApp session:
 |----------|-------------|---------|
 | `BAILEYS_GATEWAY_URL` | Baileys Gateway URL | http://localhost:3002 |
 | `BAILEYS_GATEWAY_API_KEY` | API key (optional) | - |
-| `WAHA_URL` | WAHA URL (if using WAHA) | http://localhost:3001 |
-| `WAHA_API_KEY` | WAHA API key (optional) | - |
-| `EVOLUTION_URL` | Evolution URL (deprecated) | http://localhost:8080 |
-
-## Gateway Priority
-
-If multiple gateways are configured, the system uses them in this order:
-1. Baileys Gateway
-2. WAHA
-3. Evolution API (fallback)
 
 ## API Endpoints
 

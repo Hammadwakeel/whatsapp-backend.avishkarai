@@ -17,85 +17,14 @@ services:
       timeout: 5s
       retries: 5
 
-  # Evolution API for WhatsApp gateway
-  evolution-api:
-    # evoapicloud is the maintained Community Edition image (QR/session fixes land here first).
-    # Override: EVOLUTION_DOCKER_IMAGE=atendai/evolution-api:latest
-    image: ${EVOLUTION_DOCKER_IMAGE:-evoapicloud/evolution-api:latest}
-    container_name: evolution-api
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      # Server Configuration
-      - SERVER_URL=http://localhost:8080
-      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
-
-      # Database (PostgreSQL - SQLite is not supported)
-      - DATABASE_PROVIDER=postgresql
-      - DATABASE_CONNECTION_URI=postgresql://postgres:postgres@evolution-db:5432/evolution?schema=public
-
-      # DISABLED: Per-tenant webhook configuration is done via API.
-      # Each tenant's WhatsApp instance configures its own webhook when connecting.
-      # Global webhooks only work for the default "inika" instance.
-      - WEBHOOK_GLOBAL_ENABLED=false
-      # - WEBHOOK_GLOBAL_URL=${WEBHOOK_GLOBAL_URL:-http://api:8000/webhook/whatsapp}
-      # - WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS=false
-      # - WEBHOOK_EVENTS_MESSAGES_UPSERT=true
-      # - WEBHOOK_EVENTS_ON=true
-
-      # WebSocket (used by Manager / some QR flows)
-      - WEBSOCKET_ENABLED=true
-
-      # QR Code Settings
-      - QR_CODE_LIMIT=30
-      - QR_CODE_COLOR=#000000
-
-      # Must track WhatsApp Web "client version" (WhatsApp Web → Menu → Help). If QR stays count=0, bump this.
-      # Override from shell or .env: CONFIG_SESSION_PHONE_VERSION=2.3000.xxxxxxxxx
-      - CONFIG_SESSION_PHONE_CLIENT=${CONFIG_SESSION_PHONE_CLIENT:-Chrome}
-      - CONFIG_SESSION_PHONE_NAME=${CONFIG_SESSION_PHONE_NAME:-Chrome}
-      - CONFIG_SESSION_PHONE_VERSION=${CONFIG_SESSION_PHONE_VERSION:-2.3000.1037554587}
-
-      # Additional Settings
-      - LOG_LEVEL=info
-      - DEL_INSTANCE=false
-    volumes:
-      - evolution-data:/evolution/instances
-    depends_on:
-      evolution-db:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  # PostgreSQL for Evolution API
-  evolution-db:
-    image: postgres:15-alpine
-    container_name: evolution-db
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=evolution
-    volumes:
-      - evolution-postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  # Inika Backend API (optional, for Docker deployment)
+  # Inika Backend API
   api:
     build: .
-    # Override API_HOST_PORT if host port 8000 is already used (e.g. local uvicorn).
     ports:
       - "${API_HOST_PORT:-8000}:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/inika_db
+      - DATABASE_URL=postgresql+asyncpg://inika:inika123@db:5432/inika_db
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
-      - EVOLUTION_URL=http://evolution-api:8080
-      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
       # Match tenant UUID from /auth login response when multiple hotels share one backend
       - WEBHOOK_WHATSAPP_TENANT_ID=${WEBHOOK_WHATSAPP_TENANT_ID:-}
     depends_on:
@@ -107,5 +36,3 @@ services:
 
 volumes:
   postgres_data:
-  evolution-data:
-  evolution-postgres:

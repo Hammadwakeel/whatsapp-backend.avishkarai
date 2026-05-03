@@ -88,8 +88,8 @@ class BaileysGatewayClient:
 
             if response.status_code == 200:
                 data = response.json()
-                waha_status = data.get("status", "UNKNOWN")
-                status = self._state_from_status(waha_status)
+                gateway_status = data.get("status", "UNKNOWN")
+                status = self._state_from_status(gateway_status)
                 is_connected = status == "CONNECTED"
 
                 return {
@@ -178,34 +178,47 @@ class BaileysGatewayClient:
             # First ensure session exists
             await self.create_session(webhook_url=webhook_url, force=force)
 
-            # Small delay to allow QR generation to start
-            await asyncio.sleep(1)
-
-            # Get QR code
+            # Poll for QR code - the gateway keeps retrying WhatsApp connection
+            # so the QR may appear after a few seconds
             client = await self._get_client()
-            response = await client.get(f"/api/sessions/{self.session_name}/qr")
+            max_attempts = 20
+            poll_interval = 3  # seconds between each poll (20 * 3 = 60s total wait)
 
-            if response.status_code == 200:
-                data = response.json()
-                qr_data = data.get("qr", [])
+            for attempt in range(max_attempts):
+                await asyncio.sleep(poll_interval)
 
-                if qr_data and len(qr_data) > 0:
-                    # Gateway returns array of QR data objects
-                    qr_item = qr_data[0]
-                    base64_qr = qr_item.get("base64", "")
+                response = await client.get(f"/api/sessions/{self.session_name}/qr")
 
-                    if base64_qr:
-                        # Convert to data URL if needed
-                        if not base64_qr.startswith("data:"):
-                            base64_qr = f"data:image/png;base64,{base64_qr}"
+                if response.status_code == 200:
+                    data = response.json()
+                    qr_data = data.get("qr", [])
 
-                        return {
-                            "success": True,
-                            "qr_code": base64_qr,
-                            "message": "QR code generated",
-                        }
+                    if qr_data and len(qr_data) > 0:
+                        qr_item = qr_data[0]
+                        base64_qr = qr_item.get("base64", "")
 
-            # Check session status - might already be connected
+                        if base64_qr:
+                            # Convert to data URL if needed
+                            if not base64_qr.startswith("data:"):
+                                base64_qr = f"data:image/png;base64,{base64_qr}"
+
+                            return {
+                                "success": True,
+                                "qr_code": base64_qr,
+                                "message": "QR code generated",
+                            }
+
+                # Check if already connected
+                status = await self.get_connection_status()
+                if status.get("connected"):
+                    return {
+                        "success": True,
+                        "qr_code": None,
+                        "already_connected": True,
+                        "message": "WhatsApp is already connected",
+                    }
+
+            # Final check after all attempts
             status = await self.get_connection_status()
             if status.get("connected"):
                 return {
@@ -217,8 +230,8 @@ class BaileysGatewayClient:
 
             return {
                 "success": False,
-                "error": "No QR code available",
-                "details": "Session may be starting up or already authenticated",
+                "error": "No QR code available after retries",
+                "details": "WhatsApp connection may be blocked. Try a different network or VPN.",
             }
         except Exception as e:
             logger.error(f"Failed to generate Baileys QR: {e}")
@@ -331,25 +344,9 @@ class BaileysGatewayClient:
 
 
 # Convenience function to create client for a tenant
-def create_baileys_client(tenant_id: str, webhook_url: Optional[str] = None) -> BaileysGatewayClient:
-    """Create a Baileys Gateway client for a specific tenant"""
+def create_baileys_client(tenant_id: str) -> BaileysGatewayClient:
+    """Create a Baileys Gateway client for a specific tenant."""
     import hashlib
     hash_suffix = hashlib.md5(tenant_id.encode()).hexdigest()[:8]
     session_name = f"inika-{hash_suffix}"
     return BaileysGatewayClient(session_name=session_name)
-
-
-# Legacy compatibility - export as EvolutionClient for code using old names
-EvolutionClient = BaileysGatewayClient
-
-
-def is_baileys_gateway_configured() -> bool:
-    """Check if Baileys Gateway is configured as the WhatsApp gateway."""
-    settings = get_settings()
-    return bool(settings.baileys_gateway_url)
-
-
-def is_waha_configured() -> bool:
-    """Check if WAHA is configured as the WhatsApp gateway."""
-    settings = get_settings()
-    return bool(settings.waha_url)

@@ -31,13 +31,11 @@ class Settings(BaseSettings):
     # Web Search (SHARED across all tenants)
     tavily_api_key: str = ""
 
-    # Evolution API - Free WhatsApp Gateway
-    evolution_url: str = "http://localhost:8080"
-    evolution_api_key: str = ""
-    evolution_instance_name: str = "inika"
-    evolution_webhook_url: Optional[str] = None  # Override webhook URL (e.g., https://yourdomain.com). If None, uses api_base_url.
+    # Baileys Gateway - Local multi-tenant WhatsApp gateway (Node.js service)
+    baileys_gateway_url: str = "http://localhost:3002"
+    baileys_gateway_api_key: str = ""
 
-    # API base URL (for building webhook URLs that Evolution can reach)
+    # API base URL (for building webhook URLs)
     api_base_url: str = "http://localhost:8000"
 
     # Inika External Booking API
@@ -47,15 +45,7 @@ class Settings(BaseSettings):
     # Weather API (OpenWeatherMap)
     openweather_api_key: str = ""
 
-    # WAHA - Production WhatsApp Gateway (alternative to Evolution API)
-    waha_url: str = "http://localhost:3001"
-    waha_api_key: str = ""
-
-    # Baileys Gateway - Local multi-tenant WhatsApp gateway (Node.js service)
-    baileys_gateway_url: str = "http://localhost:3002"
-    baileys_gateway_api_key: str = ""
-
-    # Evolution webhook → tenant when multiple tenants exist (UUID). Empty = first tenant (single-hotel setups).
+    # Webhook tenant routing when multiple tenants share one backend (UUID). Empty = first tenant.
     webhook_whatsapp_tenant_id: Optional[str] = None
 
 

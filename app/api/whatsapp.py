@@ -1,9 +1,9 @@
-"""WhatsApp API Routes - WAHA / Evolution API Integration"""
+"""WhatsApp API Routes - Baileys Gateway Integration"""
 
-import asyncio
 import logging
+import os
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import get_db
@@ -16,6 +16,7 @@ from app.schemas.whatsapp import (
 )
 from app.services.whatsapp_service import WhatsAppService
 from app.services.sse_manager import sse_manager, create_sse_response
+from app.services.baileys_client import BaileysGatewayClient
 from app.api.deps import get_current_tenant
 
 logger = logging.getLogger(__name__)
@@ -24,48 +25,22 @@ router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 settings = get_settings()
 
 
-def get_whatsapp_client(tenant_id: str):
-    """Get the appropriate WhatsApp client (Baileys Gateway, WAHA, or Evolution)."""
+def get_whatsapp_client(tenant_id: str) -> BaileysGatewayClient:
+    """Get the Baileys Gateway client for a tenant."""
     import hashlib
 
-    # Create per-tenant session name (same format for all gateways)
     hash_suffix = hashlib.md5(tenant_id.encode()).hexdigest()[:8]
     session_name = f"inika-{hash_suffix}"
-
-    # Priority: Baileys Gateway > WAHA > Evolution
-    if settings.baileys_gateway_url:
-        from app.services.baileys_client import BaileysGatewayClient
-        return BaileysGatewayClient(session_name=session_name)
-    elif settings.waha_url:
-        from app.services.waha_client import WAHAClient
-        return WAHAClient(session_name=session_name)
-    else:
-        from app.services.evolution_client import EvolutionClient
-        from app.services.whatsapp_service import WhatsAppService
-        whatsapp_service = WhatsAppService(None)
-        instance_name = whatsapp_service._get_tenant_instance_name(tenant_id)
-        return EvolutionClient(instance_name=instance_name)
+    return BaileysGatewayClient(session_name=session_name)
 
 
-def get_tenant_webhook_url(tenant_id: str, request: Request = None) -> str:
-    """Build the tenant-specific webhook URL for WhatsApp gateway.
+def get_tenant_webhook_url(tenant_id: str) -> str:
+    """Build the tenant-specific webhook URL for the Baileys Gateway.
 
     The gateway sends webhooks to this URL when messages are received.
     The tenant_id query param allows routing to the correct tenant.
     """
-    import os
-
-    # Determine which webhook endpoint to use based on configured gateway
-    if settings.baileys_gateway_url:
-        base_path = "/webhook/whatsapp-baileys"
-    elif settings.waha_url:
-        base_path = "/webhook/whatsapp-waha"
-    else:
-        base_path = "/webhook/whatsapp"
-
-    # If explicit webhook URL is set, use it
-    if settings.evolution_webhook_url:
-        return f"{settings.evolution_webhook_url.rstrip('/')}{base_path}?tenant_id={tenant_id}"
+    base_path = "/webhook/whatsapp-baileys"
 
     # Check for Docker environment
     in_docker = os.path.exists("/.dockerenv") or os.environ.get("DOCKER_CONTAINER")
@@ -152,17 +127,16 @@ async def get_whatsapp_status(
 
 @router.post("/connect")
 async def connect_whatsapp(
-    request: Request,
     current_tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Connect WhatsApp by generating QR code.
-    Uses WAHA if configured, otherwise Evolution API.
+    Uses Baileys Gateway.
     """
     whatsapp_service = WhatsAppService(db)
     client = get_whatsapp_client(current_tenant.id)
-    webhook_url = get_tenant_webhook_url(current_tenant.id, request)
+    webhook_url = get_tenant_webhook_url(current_tenant.id)
 
     # Check current status
     status = await client.get_connection_status()
@@ -202,7 +176,6 @@ async def connect_whatsapp(
         }
 
     if qr_result.get("already_connected"):
-        await loadAll()
         return {
             "status": "connected",
             "message": "WhatsApp is already connected",
@@ -212,7 +185,7 @@ async def connect_whatsapp(
     return {
         "status": "waiting",
         "message": qr_result.get("error") or qr_result.get("details") or "Generating QR code...",
-        "gateway": "WAHA" if settings.waha_url else "Evolution",
+        "gateway": "Baileys",
     }
 
 
@@ -242,7 +215,6 @@ async def disconnect_whatsapp(
 
 @router.get("/events")
 async def whatsapp_sse_events(
-    request: Request,
     current_tenant: Tenant = Depends(get_current_tenant),
 ):
     """
@@ -253,14 +225,13 @@ async def whatsapp_sse_events(
 
 @router.post("/refresh-webhook")
 async def refresh_whatsapp_webhook(
-    request: Request,
     current_tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ):
     """Refresh webhook configuration for WhatsApp gateway."""
     whatsapp_service = WhatsAppService(db)
     client = get_whatsapp_client(current_tenant.id)
-    webhook_url = get_tenant_webhook_url(current_tenant.id, request)
+    webhook_url = get_tenant_webhook_url(current_tenant.id)
 
     # Re-create session with new webhook
     if hasattr(client, 'create_session'):

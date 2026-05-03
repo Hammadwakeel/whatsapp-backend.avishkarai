@@ -5,7 +5,7 @@ from app.services.wiki_service import WikiService, WikiIngestService, WikiQueryS
 from app.services.search_service import WebSearchService, TavilySearchService, web_search
 from app.services.agent_service import AgentService
 from app.services.whatsapp_service import WhatsAppService
-from app.services.evolution_client import EvolutionClient, evolution_client
+from app.services.baileys_client import BaileysGatewayClient, create_baileys_client
 
 __all__ = [
     "TenantService",
@@ -15,5 +15,5 @@ __all__ = [
     "WebSearchService", "TavilySearchService", "web_search",
     "AgentService",
     "WhatsAppService",
-    "EvolutionClient", "evolution_client",
+    "BaileysGatewayClient", "create_baileys_client",
 ]

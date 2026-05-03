@@ -25,12 +25,11 @@ class WhatsAppService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    def _get_tenant_instance_name(self, tenant_id: str) -> str:
-        """Generate a tenant-specific Evolution instance name for session isolation.
+    def _get_tenant_session_name(self, tenant_id: str) -> str:
+        """Generate a tenant-specific session name for the WhatsApp gateway.
 
-        Uses a hash of tenant_id to create a unique but stable instance name,
-        avoiding any tenant-specific data in the instance name itself.
-        Format: {base_prefix}-{8char_hash}
+        Uses a hash of tenant_id to create a unique but stable session name.
+        Format: inika-{8char_hash}
         """
         hash_suffix = hashlib.md5(tenant_id.encode()).hexdigest()[:8]
         return f"inika-{hash_suffix}"
@@ -43,12 +42,12 @@ class WhatsAppService:
         session = result.scalar_one_or_none()
 
         if not session:
-            instance_name = self._get_tenant_instance_name(tenant_id)
+            session_name = self._get_tenant_session_name(tenant_id)
             session = WhatsAppSession(
                 id=str(uuid4()),
                 tenant_id=tenant_id,
                 status=SessionStatus.DISCONNECTED.value,
-                evolution_instance_name=instance_name,
+                gateway_session_name=session_name,
             )
             self.db.add(session)
             await self.db.commit()
